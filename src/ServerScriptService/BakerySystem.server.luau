@@ -326,6 +326,28 @@ local function updateCarriedTray(player, data)
 	end
 end
 
+-- Pantry shelf: each jar fills up to show how much of that ingredient the owner has.
+-- Passing no data empties the shelf, for when nobody owns the bakery.
+local function updatePantryShelf(plot, data)
+	local capacity = data and pantryCapacity(data) or 1
+	for _, ingredient in Config.Ingredients do
+		local slot = plot.pantrySlots:FindFirstChild(ingredient.Id)
+		local count = data and data.Pantry[ingredient.Id] or 0
+		local shown = data and ("%d/%d"):format(count, capacity) or ""
+		if slot and slot:GetAttribute("Shown") ~= shown then
+			slot:SetAttribute("Shown", shown)
+			local jar = slot.Jar
+			local fill = slot.Fill
+			local height = math.max((jar.Size.X - 0.1) * math.min(count / capacity, 1), 0.05)
+			fill.Transparency = count > 0 and 0 or 1
+			fill.Size = Vector3.new(height, fill.Size.Y, fill.Size.Z)
+			-- The jar is a cylinder stood on end, so its X axis points up.
+			fill.CFrame = jar.CFrame * CFrame.new(-jar.Size.X / 2 + 0.05 + height / 2, 0, 0)
+			slot.LabelAnchor.Label.Text.Text = data and ("%s %s"):format(ingredient.Name, shown) or ingredient.Name
+		end
+	end
+end
+
 -- Each hotbar box holds one kind of treat. A kind keeps its box until it runs out.
 local function refreshHotbar(player, data)
 	local bar = hotbars[player]
@@ -373,6 +395,7 @@ local function syncStats(player)
 	local plot = playerPlots[player]
 	local orders = {}
 	if plot then
+		updatePantryShelf(plot, data)
 		for slot = 1, #Config.DeliveryTiers do
 			local order = plot.orders[slot]
 			orders[slot] = order or { Waiting = true, Name = Config.DeliveryTiers[slot].Name }
@@ -1240,6 +1263,7 @@ local function claimPlot(player)
 			resetOven(plot)
 			setActive(plot.ovenPrompt, true)
 			setActive(plot.cookbookPrompt, true)
+			setActive(plot.pantryPrompt, true)
 			setActive(plot.packingPrompt, true)
 			local baseCFrame = plot.model.DisplayCase.Base.CFrame
 			addCase(
@@ -1283,7 +1307,9 @@ local function releasePlot(player)
 	resetOven(plot)
 	setActive(plot.ovenPrompt, false)
 	setActive(plot.cookbookPrompt, false)
+	setActive(plot.pantryPrompt, false)
 	setActive(plot.packingPrompt, false)
+	updatePantryShelf(plot, nil)
 	for _, case in plot.cases do
 		case.connection:Disconnect()
 		case.items:Destroy()
@@ -1538,6 +1564,8 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		ovenPrompt = body.Prompt,
 		ovenStatus = body.Status.Label,
 		cookbookPrompt = model.UpgradeStation.Prompt,
+		pantryPrompt = model.PantryShelf.Back.Prompt,
+		pantrySlots = model.PantryShelf.Slots,
 		packingTable = model.PackingTable,
 		packingPrompt = model.PackingTable.Prompt,
 		hatch = model.Hatch,
@@ -1557,6 +1585,7 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 	end
 	setActive(plot.ovenPrompt, false)
 	setActive(plot.cookbookPrompt, false)
+	setActive(plot.pantryPrompt, false)
 	setActive(plot.packingPrompt, false)
 	setActive(model.DisplayCase.Base.Prompt, false)
 	plot.ovenPrompt.Triggered:Connect(function(player)
@@ -1565,6 +1594,11 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 	plot.cookbookPrompt.Triggered:Connect(function(player)
 		if canUse(player, plot, plot.cookbookPrompt) then
 			openPanelEvent:FireClient(player, "Cookbook")
+		end
+	end)
+	plot.pantryPrompt.Triggered:Connect(function(player)
+		if canUse(player, plot, plot.pantryPrompt) then
+			openPanelEvent:FireClient(player, "Pantry")
 		end
 	end)
 	plot.packingPrompt.Triggered:Connect(function(player)
