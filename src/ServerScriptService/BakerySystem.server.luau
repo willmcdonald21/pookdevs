@@ -139,6 +139,31 @@ local function trayCapacity(data)
 	return upgradeLevel(data, "Tray").Capacity
 end
 
+local function pantryCapacity(data)
+	return upgradeLevel(data, "Pantry").Capacity
+end
+
+-- Returns text like "1 Butter, 2 Eggs" for what's missing, or nil when there's enough.
+local function missingIngredients(data, recipe)
+	local missing = {}
+	for _, ingredient in Config.Ingredients do
+		local need = recipe.Ingredients[ingredient.Id]
+		if need and data.Pantry[ingredient.Id] < need then
+			table.insert(missing, ("%d %s"):format(need - data.Pantry[ingredient.Id], ingredient.Name))
+		end
+	end
+	return #missing > 0 and table.concat(missing, ", ") or nil
+end
+
+local function canBakeAnything(data)
+	for index = 1, data.RecipesUnlocked do
+		if not missingIngredients(data, Config.Recipes[index]) then
+			return true
+		end
+	end
+	return false
+end
+
 local function trayTotal(data)
 	local total = 0
 	for _, count in data.Tray do
@@ -218,6 +243,9 @@ local function updateGuide(player)
 		end
 	elseif plot.ovenState == "baking" then
 		hint = ("Baking %s..."):format(plot.bakeRecipe.Name:lower())
+	elseif not canBakeAnything(data) then
+		hint = "Out of ingredients! Unpack your delivery crate or visit the grocery store"
+		target = "IngredientCrate"
 	else
 		hint = "Choose a treat to bake at the oven"
 		target = "Oven"
@@ -357,6 +385,8 @@ local function syncStats(player)
 		Levels = levels,
 		Tray = data.Tray,
 		TrayCapacity = trayCapacity(data),
+		Pantry = data.Pantry,
+		PantryCapacity = pantryCapacity(data),
 		Hotbar = bar.Slots,
 		SelectedSlot = bar.Selected,
 		Passes = PurchaseHandler.OwnedPasses(player),
@@ -433,9 +463,13 @@ local function resetOven(plot)
 	setBurners(plot, false)
 end
 
+-- Callers check missingIngredients first. The batch's ingredients are used up here.
 local function startBake(plot, player, recipe)
 	local data = PlayerData.Get(player)
 	local session = plot.session
+	for id, count in recipe.Ingredients do
+		data.Pantry[id] -= count
+	end
 	plot.ovenState = "baking"
 	plot.bakeRecipe = recipe
 	plot.ovenCount = upgradeLevel(data, "Batch").BatchSize
@@ -524,6 +558,11 @@ bakeEvent.OnServerEvent:Connect(function(player, index)
 	end
 	if not isNear(player, plot.ovenPrompt.Parent.Position, PANEL_REACH) then
 		notify(player, "Go to your oven to bake")
+		return
+	end
+	local missing = missingIngredients(data, recipe)
+	if missing then
+		notify(player, "You need " .. missing .. " more")
 		return
 	end
 	startBake(plot, player, recipe)
@@ -1173,7 +1212,7 @@ local function runHelpers(plot, session, player)
 			end
 		elseif plot.ovenState == "idle" and baker.Delay and waited >= baker.Delay then
 			local recipe = Config.Recipes[data.LastRecipe]
-			if recipe then
+			if recipe and not missingIngredients(data, recipe) then
 				startBake(plot, player, recipe)
 			end
 		end
