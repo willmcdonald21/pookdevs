@@ -16,6 +16,8 @@ local PurchaseHandler = require(ServerScriptService:WaitForChild("PurchaseHandle
 
 local REACH_BUFFER = 8
 local PANEL_REACH = 25
+local CRATE_REACH = 16
+local FIRST_CRATE_DELAY = 15
 local SLOT_ITEM_SCALE = 0.5
 local TRAY_ITEM_SCALE = 0.6
 local CUSTOMER_COLORS = {
@@ -51,6 +53,7 @@ local selectSlotEvent = remote("SelectSlot")
 local popupEvent = remote("Popup")
 local claimDailyEvent = remote("ClaimDaily")
 local claimGoalEvent = remote("ClaimGoal")
+local unpackCrateEvent = remote("UnpackCrate")
 
 local plots = {}
 local playerPlots = {}
@@ -924,6 +927,162 @@ newOrderEvent.OnServerEvent:Connect(function(player, slot)
 	end
 end)
 
+-- Delivery crate
+-- Contents lean toward what the owner's unlocked recipes use, but anything can turn up.
+local function crateContents(data)
+	local weights = {}
+	local total = 0
+	for index = 1, data.RecipesUnlocked do
+		for id, count in Config.Recipes[index].Ingredients do
+			weights[id] = (weights[id] or 0) + count
+		end
+	end
+	for _, ingredient in Config.Ingredients do
+		weights[ingredient.Id] = (weights[ingredient.Id] or 0) + 1
+		total += weights[ingredient.Id]
+	end
+	local contents = {}
+	for _ = 1, Config.Crate.Size do
+		local roll = math.random() * total
+		for index, ingredient in Config.Ingredients do
+			roll -= weights[ingredient.Id]
+			if roll <= 0 or index == #Config.Ingredients then
+				contents[ingredient.Id] = (contents[ingredient.Id] or 0) + 1
+				break
+			end
+		end
+	end
+	return contents
+end
+
+local function setCrateLabel(crate)
+	crate.label.Text = "Free ingredients!\n" .. Config.DescribeIngredients(crate.contents)
+end
+
+local function buildCrate(plot, contents)
+	local model = Instance.new("Model")
+	model.Name = "IngredientCrate"
+	local box = Instance.new("Part")
+	box.Name = "Box"
+	box.Anchored = true
+	box.Size = Vector3.new(2.8, 2, 2.8)
+	box.CFrame = plot.crateSpot * CFrame.new(0, 1, 0)
+	box.Color = Color3.fromRGB(190, 140, 90)
+	box.Material = Enum.Material.WoodPlanks
+	box.Parent = model
+	model.PrimaryPart = box
+	for _, y in { -0.55, 0.55 } do
+		local slat = Instance.new("Part")
+		slat.Name = "Slat"
+		slat.Anchored = true
+		slat.CanCollide = false
+		slat.Size = Vector3.new(2.9, 0.25, 2.9)
+		slat.CFrame = box.CFrame * CFrame.new(0, y, 0)
+		slat.Color = Color3.fromRGB(150, 100, 65)
+		slat.Material = Enum.Material.Wood
+		slat.Parent = model
+	end
+	local shown = 0
+	for _, ingredient in Config.Ingredients do
+		if contents[ingredient.Id] and shown < 3 then
+			local icon = ItemBuilder.Build(ingredient, 0.7, box.CFrame * CFrame.new(-0.8 + shown * 0.8, 1, 0))
+			ItemBuilder.Anchor(icon)
+			icon.Parent = model
+			shown += 1
+		end
+	end
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "Label"
+	billboard.Size = UDim2.fromOffset(200, 44)
+	billboard.StudsOffset = Vector3.new(0, 3, 0)
+	billboard.MaxDistance = 60
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundColor3 = Color3.fromRGB(255, 250, 240)
+	label.TextColor3 = Color3.fromRGB(90, 60, 70)
+	label.Font = Enum.Font.FredokaOne
+	label.TextScaled = true
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.3, 0)
+	corner.Parent = label
+	label.Parent = billboard
+	billboard.Parent = box
+
+	-- The client fires UnpackCrate when this prompt is used.
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "Prompt"
+	prompt.ActionText = "Unpack Crate"
+	prompt.ObjectText = "Free ingredients"
+	prompt.HoldDuration = 0.3
+	prompt.MaxActivationDistance = 8
+	prompt.RequiresLineOfSight = false
+	prompt:SetAttribute("Active", true)
+	prompt:SetAttribute("Action", "UnpackCrate")
+	prompt.Parent = box
+
+	model.Parent = plot.model
+	local crate = { model = model, label = label, contents = contents }
+	setCrateLabel(crate)
+	return crate
+end
+
+local function removeCrate(plot)
+	if plot.crate then
+		plot.crate.model:Destroy()
+		plot.crate = nil
+	end
+end
+
+-- A crate arrives soon after the owner joins, then Config.Crate.Interval after each is emptied.
+local function runCrates(plot, session, player)
+	plot.crateDueAt = os.clock() + FIRST_CRATE_DELAY
+	while plot.session == session do
+		task.wait(1)
+		local data = PlayerData.Get(player)
+		if plot.session ~= session or not data then
+			return
+		end
+		if not plot.crate and os.clock() >= plot.crateDueAt then
+			plot.crate = buildCrate(plot, crateContents(data))
+			notify(player, "A free ingredient crate arrived outside your door!", "Ding")
+		end
+	end
+end
+
+unpackCrateEvent.OnServerEvent:Connect(function(player)
+	local plot = playerPlots[player]
+	local data = PlayerData.Get(player)
+	local crate = plot and plot.crate
+	if not crate or not data or not isNear(player, crate.model.PrimaryPart.Position, CRATE_REACH) then
+		return
+	end
+	local capacity = pantryCapacity(data)
+	local taken = {}
+	for id, count in crate.contents do
+		local take = math.min(count, capacity - data.Pantry[id])
+		if take > 0 then
+			data.Pantry[id] += take
+			taken[id] = take
+		end
+		crate.contents[id] = count - take > 0 and count - take or nil
+	end
+	if next(crate.contents) == nil then
+		removeCrate(plot)
+		plot.crateDueAt = os.clock() + Config.Crate.Interval
+	else
+		setCrateLabel(crate)
+	end
+	syncStats(player)
+	if next(taken) == nil then
+		notify(player, "Your pantry is full! Bake something or buy a Bigger Pantry")
+	elseif plot.crate then
+		notify(player, "Unpacked " .. Config.DescribeIngredients(taken) .. ". The rest didn't fit", "Coin")
+	else
+		notify(player, "Unpacked " .. Config.DescribeIngredients(taken), "Coin")
+	end
+end)
+
 -- Customers
 local function buildPerson(name, shirt, skin)
 	local model = Instance.new("Model")
@@ -1287,6 +1446,7 @@ local function claimPlot(player)
 			task.spawn(runCustomerSpawner, plot, plot.session, player)
 			refreshHelpers(plot, data)
 			task.spawn(runHelpers, plot, plot.session, player)
+			task.spawn(runCrates, plot, plot.session, player)
 			return plot
 		end
 	end
@@ -1320,6 +1480,7 @@ local function releasePlot(player)
 	plot.placedFolder:ClearAllChildren()
 	plot.customersFolder:ClearAllChildren()
 	plot.helpersFolder:ClearAllChildren()
+	removeCrate(plot)
 end
 
 -- Gives exclusive and game pass items to their owners, and removes them from anyone
@@ -1579,6 +1740,10 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		door = floor.CFrame * CFrame.new(0, 0.6, 19),
 		customersFolder = model.Customers,
 		helpersFolder = helpersFolder,
+		-- Outside the door, beside the customer path.
+		crateSpot = floor.CFrame * CFrame.new(9, floor.Size.Y / 2, 24),
+		crate = nil,
+		crateDueAt = 0,
 	}
 	for slot in Config.DeliveryTiers do
 		plot.orderTokens[slot] = 0
