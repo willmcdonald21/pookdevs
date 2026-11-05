@@ -142,6 +142,15 @@ local function clean(saved)
 		end
 	end
 	data.Stock[Config.StarterCaseKey] = cleanStock(savedStock[Config.StarterCaseKey], #Config.StarterCaseSlots)
+
+	-- New saves start with a stocked pantry. Counts never go above the pantry's capacity.
+	data.Pantry = {}
+	local savedPantry = type(saved.Pantry) == "table" and saved.Pantry or nil
+	local capacity = Config.GetUpgrade("Pantry").Levels[data.PantryLevel].Capacity
+	for _, ingredient in Config.Ingredients do
+		local count = savedPantry and cleanCount(savedPantry[ingredient.Id]) or Config.StartingPantry
+		data.Pantry[ingredient.Id] = math.min(count, capacity)
+	end
 	return data
 end
 
