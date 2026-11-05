@@ -546,14 +546,14 @@ Config.NewOrderStars = 1
 -- Packs bought with Robux. ProductId comes from Creator Hub, and 0 means it isn't
 -- on sale yet. Prices are set in Creator Hub, and the store reads them from Roblox.
 Config.Products = {
-	{ Name = "Coin Bag", ProductId = 0, Currency = "Coins", Amount = 500 },
-	{ Name = "Coin Sack", ProductId = 0, Currency = "Coins", Amount = 2000 },
-	{ Name = "Coin Chest", ProductId = 0, Currency = "Coins", Amount = 6000 },
-	{ Name = "Star Pouch", ProductId = 0, Currency = "Stars", Amount = 10 },
-	{ Name = "Star Jar", ProductId = 0, Currency = "Stars", Amount = 30 },
-	{ Name = "Star Chest", ProductId = 0, Currency = "Stars", Amount = 100 },
+	{ Name = "Coin Bag", ProductId = 3728575847, Currency = "Coins", Amount = 500 },
+	{ Name = "Coin Sack", ProductId = 3728575849, Currency = "Coins", Amount = 2000 },
+	{ Name = "Coin Chest", ProductId = 3728575852, Currency = "Coins", Amount = 6000 },
+	{ Name = "Star Pouch", ProductId = 3728575854, Currency = "Stars", Amount = 10 },
+	{ Name = "Star Jar", ProductId = 3728575857, Currency = "Stars", Amount = 30 },
+	{ Name = "Star Chest", ProductId = 3728575858, Currency = "Stars", Amount = 100 },
 	-- Amount is minutes of double coins. Buying again adds time.
-	{ Name = "2x Boost", ProductId = 0, Currency = "Boost", Amount = 15 },
+	{ Name = "2x Boost", ProductId = 3728575863, Currency = "Boost", Amount = 15 },
 }
 
 -- Daily reward streak (days count in UTC). Missing a day starts again at day 1.
