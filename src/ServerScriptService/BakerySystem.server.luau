@@ -49,6 +49,7 @@ local newOrderEvent = remote("NewOrder")
 local selectSlotEvent = remote("SelectSlot")
 local popupEvent = remote("Popup")
 local claimDailyEvent = remote("ClaimDaily")
+local claimGoalEvent = remote("ClaimGoal")
 
 local plots = {}
 local playerPlots = {}
@@ -92,6 +93,40 @@ end
 -- Days are counted in UTC, so everyone's new day starts at the same moment.
 local function today()
 	return os.time() // 86400
+end
+
+-- New goals each day. Rewards scale with the best recipe unlocked.
+local function ensureGoals(data)
+	if data.Goals.Day == today() then
+		return
+	end
+	local kinds = table.clone(Config.Goals.Kinds)
+	local reward = Config.Recipes[data.RecipesUnlocked].Price * Config.Goals.CoinsPerPrice
+	local list = {}
+	for _ = 1, math.min(Config.Goals.DailyCount, #kinds) do
+		local kind = table.remove(kinds, math.random(#kinds))
+		table.insert(list, {
+			Kind = kind.Id,
+			Recipe = kind.Id == "SellRecipe" and math.random(data.RecipesUnlocked) or 0,
+			Target = math.random(kind.Min, kind.Max),
+			Progress = 0,
+			Reward = reward,
+			Claimed = false,
+		})
+	end
+	data.Goals = { Day = today(), List = list }
+end
+
+-- A sale counts toward both "sell treats" and a matching "sell this recipe" goal.
+local function addGoalProgress(data, kind, recipeIndex)
+	ensureGoals(data)
+	for _, goal in data.Goals.List do
+		local matches = goal.Kind == kind
+			or (kind == "Sell" and goal.Kind == "SellRecipe" and goal.Recipe == recipeIndex)
+		if matches then
+			goal.Progress = math.min(goal.Target, goal.Progress + 1)
+		end
+	end
 end
 
 local function bakeTime(data, recipe)
@@ -251,6 +286,7 @@ local function syncStats(player)
 	if not data then
 		return
 	end
+	ensureGoals(data)
 	local bar = refreshHotbar(player, data)
 	player:SetAttribute("Coins", data.Coins)
 	player:SetAttribute("Stars", data.Stars)
@@ -283,6 +319,7 @@ local function syncStats(player)
 		Passes = PurchaseHandler.OwnedPasses(player),
 		Multiplier = coinMultiplier(player, data),
 		BoostUntil = data.BoostUntil,
+		Goals = data.Goals.List,
 		Owned = data.Owned,
 		Placed = data.Placed,
 		Charm = totalCharm(data),
@@ -354,7 +391,8 @@ local function startBake(plot, player, recipe)
 	plot.ovenPrompt.HoldDuration = 0.5
 	plot.smoke.Enabled = true
 	setOvenWindow(plot, Color3.fromRGB(255, 150, 60), Enum.Material.Neon)
-	updateGuide(player)
+	addGoalProgress(data, "Bake")
+	syncStats(player)
 
 	task.spawn(function()
 		local finishAt = os.clock() + bakeTime(data, recipe)
@@ -741,6 +779,7 @@ shipEvent.OnServerEvent:Connect(function(player, slot)
 	end
 	local earned = earn(player, data, order.Coins)
 	data.Stars += order.Stars
+	addGoalProgress(data, "Ship")
 	data.TutorialDone = true
 	queueOrder(plot, player, slot)
 	animateBox(plot)
@@ -766,11 +805,9 @@ newOrderEvent.OnServerEvent:Connect(function(player, slot)
 end)
 
 -- Customers
-local function buildCustomer()
+local function buildPerson(name, shirt, skin)
 	local model = Instance.new("Model")
-	model.Name = "Customer"
-	local shirt = CUSTOMER_COLORS[math.random(#CUSTOMER_COLORS)]
-	local skin = SKIN_COLORS[math.random(#SKIN_COLORS)]
+	model.Name = name
 
 	local root = Instance.new("Part")
 	root.Name = "Torso"
@@ -834,7 +871,36 @@ local function buildCustomer()
 	corner.Parent = label
 	label.Parent = bubble
 	bubble.Parent = root
+	return model, label
+end
 
+-- Golden customers wear a crown and sparkle.
+local function buildCustomer(golden)
+	local shirt = CUSTOMER_COLORS[math.random(#CUSTOMER_COLORS)]
+	local skin = SKIN_COLORS[math.random(#SKIN_COLORS)]
+	local model, label = buildPerson("Customer", shirt, skin)
+	if golden then
+		local head = model.Head
+		local crown = Instance.new("Part")
+		crown.Name = "Crown"
+		crown.Size = Vector3.new(1.1, 0.5, 1.1)
+		crown.Color = Color3.fromRGB(255, 200, 60)
+		crown.Material = Enum.Material.Foil
+		crown.CanCollide = false
+		crown.Massless = true
+		crown.CFrame = head.CFrame * CFrame.new(0, 0.95, 0)
+		-- A joint with a fixed offset, like the limbs, so the crown follows the head after
+		-- the customer is moved into place.
+		local joint = Instance.new("Motor6D")
+		joint.Part0 = head
+		joint.Part1 = crown
+		joint.C0 = CFrame.new(0, 0.95, 0)
+		joint.Parent = crown
+		crown.Parent = model
+		local sparkles = Instance.new("Sparkles")
+		sparkles.SparkleColor = Color3.fromRGB(255, 225, 130)
+		sparkles.Parent = model.PrimaryPart
+	end
 	CollectionService:AddTag(model, "Customer")
 	return model, label
 end
@@ -878,7 +944,8 @@ end
 
 -- Walks one customer through: door, a stocked case, the counter to pay, then out.
 local function runCustomer(plot, session)
-	local model, label = buildCustomer()
+	local golden = math.random() < Config.GoldenCustomer.Chance
+	local model, label = buildCustomer(golden)
 	local root = model.PrimaryPart
 	local start = plot.customerStart.Position + Vector3.new(0, 2.2, 0)
 	local door = plot.door.Position + Vector3.new(0, 3, 0)
@@ -928,9 +995,24 @@ local function runCustomer(plot, session)
 			model:Destroy()
 			return
 		end
-		local coins = earn(owner, data, salePrice(data, recipe))
+		local price = salePrice(data, recipe)
+		local tip = 0
+		if golden then
+			price *= Config.GoldenCustomer.PayScale
+			if math.random() < Config.GoldenCustomer.StarChance then
+				tip = 1
+			end
+		end
+		local coins = earn(owner, data, price)
+		data.Stars += tip
+		addGoalProgress(data, "Sell", table.find(Config.Recipes, recipe))
 		syncStats(owner)
-		notify(owner, ("+%d coins: %s sold"):format(coins, recipe.Name), "Coin")
+		if golden then
+			local tipText = tip > 0 and " and tipped a Sugar Star" or ""
+			notify(owner, ("+%d coins: a golden customer bought %s%s!"):format(coins, recipe.Name:lower(), tipText), "Coin")
+		else
+			notify(owner, ("+%d coins: %s sold"):format(coins, recipe.Name), "Coin")
+		end
 		say(label, "Thank you!")
 		task.wait(0.8)
 	else
@@ -1183,6 +1265,24 @@ claimDailyEvent.OnServerEvent:Connect(function(player)
 	data.DailyStreak = streakDay
 	syncStats(player)
 	notify(player, ("Day %d reward claimed!"):format(streakDay), "Coin")
+end)
+
+claimGoalEvent.OnServerEvent:Connect(function(player, index)
+	local data = PlayerData.Get(player)
+	if not data or type(index) ~= "number" then
+		return
+	end
+	ensureGoals(data)
+	local goal = data.Goals.List[index]
+	if not goal or goal.Claimed or goal.Progress < goal.Target then
+		return
+	end
+	goal.Claimed = true
+	data.Coins += goal.Reward
+	data.Stars += Config.Goals.Stars
+	syncStats(player)
+	local starWord = Config.Goals.Stars == 1 and "Sugar Star" or "Sugar Stars"
+	notify(player, ("Goal complete! +%d coins, +%d %s"):format(goal.Reward, Config.Goals.Stars, starWord), "Coin")
 end)
 
 local function onPassGranted(player, pass)
