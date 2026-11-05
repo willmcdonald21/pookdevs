@@ -5,6 +5,103 @@ local function rgb(r, g, b)
 	return Color3.fromRGB(r, g, b)
 end
 
+-- Ingredients. A recipe's Ingredients are used once per batch, whatever the batch size.
+-- BundlePrice is the grocery price for Config.GroceryBundle of them. Parts draw a small
+-- model for shelves, crates and menus.
+Config.Ingredients = {
+	{
+		Id = "Flour",
+		Name = "Flour",
+		Color = rgb(245, 235, 215),
+		BundlePrice = 4,
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(1.4, 1.8, 1), Y = 0.9, Color = rgb(245, 235, 215), Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(1.42, 0.5, 1.02), Y = 1.1, Color = rgb(110, 175, 215) },
+		},
+	},
+	{
+		Id = "Sugar",
+		Name = "Sugar",
+		Color = rgb(255, 255, 255),
+		BundlePrice = 4,
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(1.3, 1.6, 0.9), Y = 0.8, Color = rgb(255, 255, 255), Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(1.32, 0.45, 0.92), Y = 1, Color = rgb(240, 150, 175) },
+		},
+	},
+	{
+		Id = "Eggs",
+		Name = "Eggs",
+		Color = rgb(250, 235, 205),
+		BundlePrice = 6,
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(1.6, 0.5, 1), Y = 0.25, Color = rgb(200, 185, 165) },
+			{ Kind = "Ball", Diameter = 0.45, X = -0.4, Y = 0.6, Z = -0.2, Color = rgb(250, 235, 205) },
+			{ Kind = "Ball", Diameter = 0.45, X = 0.1, Y = 0.6, Z = 0.2, Color = rgb(250, 235, 205) },
+			{ Kind = "Ball", Diameter = 0.45, X = 0.5, Y = 0.6, Z = -0.15, Color = rgb(250, 235, 205) },
+		},
+	},
+	{
+		Id = "Butter",
+		Name = "Butter",
+		Color = rgb(255, 220, 110),
+		BundlePrice = 6,
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(1.4, 0.15, 0.9), Y = 0.08, Color = rgb(230, 230, 235) },
+			{ Kind = "Box", Size = Vector3.new(1.1, 0.55, 0.6), Y = 0.42, Color = rgb(255, 220, 110) },
+		},
+	},
+	{
+		Id = "Milk",
+		Name = "Milk",
+		Color = rgb(235, 245, 255),
+		BundlePrice = 6,
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(0.9, 1.6, 0.9), Y = 0.8, Color = rgb(240, 248, 255) },
+			{ Kind = "Box", Size = Vector3.new(0.92, 0.5, 0.92), Y = 0.9, Color = rgb(110, 175, 215) },
+			{ Kind = "Box", Size = Vector3.new(0.5, 0.35, 0.5), Y = 1.75, Color = rgb(240, 248, 255) },
+		},
+	},
+	{
+		Id = "Berries",
+		Name = "Berries",
+		Color = rgb(200, 40, 80),
+		BundlePrice = 8,
+		Parts = {
+			{ Kind = "Disc", Height = 0.5, Diameter = 1.5, Y = 0.25, Color = rgb(190, 140, 90), Material = Enum.Material.WoodPlanks },
+			{ Kind = "Ball", Diameter = 0.45, X = -0.3, Y = 0.6, Color = rgb(200, 40, 80) },
+			{ Kind = "Ball", Diameter = 0.45, X = 0.3, Y = 0.6, Z = 0.1, Color = rgb(120, 60, 160) },
+			{ Kind = "Ball", Diameter = 0.45, Y = 0.65, Z = -0.3, Color = rgb(200, 40, 80) },
+		},
+	},
+}
+
+function Config.GetIngredient(id)
+	for _, ingredient in Config.Ingredients do
+		if ingredient.Id == id then
+			return ingredient
+		end
+	end
+	return nil
+end
+
+-- Ingredients for a recipe as text, in Config.Ingredients order, like "Flour 1, Sugar 1".
+function Config.DescribeIngredients(needs)
+	local parts = {}
+	for _, ingredient in Config.Ingredients do
+		local count = needs[ingredient.Id]
+		if count then
+			table.insert(parts, ("%s %d"):format(ingredient.Name, count))
+		end
+	end
+	return table.concat(parts, ", ")
+end
+
+Config.StartingPantry = 15
+Config.GroceryBundle = 5
+-- A free crate of Size ingredients arrives outside the door every Interval seconds.
+Config.Crate = { Interval = 90, Size = 12 }
+
 -- Recipes unlock in this order. BakeScale multiplies the oven's bake time.
 Config.Recipes = {
 	{
@@ -12,6 +109,7 @@ Config.Recipes = {
 		Price = 5,
 		BakeScale = 1,
 		UnlockCost = 0,
+		Ingredients = { Flour = 1, Sugar = 1, Butter = 1 },
 		Parts = {
 			{ Kind = "Disc", Height = 0.4, Diameter = 2, Y = 0, Color = rgb(190, 130, 75) },
 			{ Kind = "Ball", Diameter = 0.35, X = 0.4, Y = 0.2, Color = rgb(70, 40, 30) },
@@ -23,6 +121,7 @@ Config.Recipes = {
 		Price = 12,
 		BakeScale = 1.3,
 		UnlockCost = 100,
+		Ingredients = { Flour = 1, Sugar = 1, Eggs = 1, Milk = 1 },
 		Parts = {
 			{ Kind = "Disc", Height = 0.8, Diameter = 1.5, Y = 0, Color = rgb(190, 130, 75) },
 			{ Kind = "Ball", Diameter = 1.6, Y = 0.7, Color = rgb(255, 180, 205) },
@@ -34,6 +133,7 @@ Config.Recipes = {
 		Price = 25,
 		BakeScale = 1.6,
 		UnlockCost = 500,
+		Ingredients = { Flour = 2, Sugar = 1, Eggs = 1, Milk = 1 },
 		Parts = {
 			{ Kind = "Disc", Height = 0.6, Diameter = 2, Y = 0, Color = rgb(215, 160, 95) },
 			{ Kind = "Disc", Height = 0.15, Diameter = 1.9, Y = 0.35, Color = rgb(255, 150, 190) },
@@ -45,6 +145,7 @@ Config.Recipes = {
 		Price = 50,
 		BakeScale = 2,
 		UnlockCost = 2500,
+		Ingredients = { Flour = 2, Butter = 1, Berries = 2 },
 		Parts = {
 			{ Kind = "Disc", Height = 0.6, Diameter = 2.4, Y = 0, Color = rgb(225, 175, 110) },
 			{ Kind = "Disc", Height = 0.15, Diameter = 1.9, Y = 0.33, Color = rgb(170, 40, 70) },
@@ -55,6 +156,7 @@ Config.Recipes = {
 		Price = 100,
 		BakeScale = 2.5,
 		UnlockCost = 10000,
+		Ingredients = { Flour = 2, Sugar = 2, Eggs = 2, Butter = 1, Milk = 1 },
 		Parts = {
 			{ Kind = "Disc", Height = 0.9, Diameter = 2.4, Y = 0, Color = rgb(255, 180, 205) },
 			{ Kind = "Disc", Height = 0.25, Diameter = 2.5, Y = 0.55, Color = rgb(255, 245, 230) },
@@ -107,6 +209,19 @@ Config.Upgrades = {
 		},
 		Describe = function(level)
 			return ("Carry %d treats"):format(level.Capacity)
+		end,
+	},
+	{
+		Id = "Pantry",
+		Name = "Bigger Pantry",
+		Levels = {
+			{ Capacity = 30 },
+			{ Capacity = 50, Cost = 150 },
+			{ Capacity = 80, Cost = 800 },
+			{ Capacity = 120, Cost = 3000 },
+		},
+		Describe = function(level)
+			return ("Store %d of each ingredient"):format(level.Capacity)
 		end,
 	},
 	{
