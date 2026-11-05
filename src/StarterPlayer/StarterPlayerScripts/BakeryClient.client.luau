@@ -29,6 +29,7 @@ local selectSlotEvent = ReplicatedStorage:WaitForChild("SelectSlot")
 local popupEvent = ReplicatedStorage:WaitForChild("Popup")
 local claimDailyEvent = ReplicatedStorage:WaitForChild("ClaimDaily")
 local claimGoalEvent = ReplicatedStorage:WaitForChild("ClaimGoal")
+local unpackCrateEvent = ReplicatedStorage:WaitForChild("UnpackCrate")
 
 local PINK = Color3.fromRGB(240, 150, 175)
 local BROWN = Color3.fromRGB(90, 60, 70)
@@ -1061,6 +1062,11 @@ local function watchPrompt(prompt)
 		refreshPrompt(prompt)
 	end)
 	refreshPrompt(prompt)
+	if prompt:GetAttribute("Action") == "UnpackCrate" then
+		prompt.Triggered:Connect(function()
+			unpackCrateEvent:FireServer()
+		end)
+	end
 end
 
 for _, instance in plotsFolder:GetDescendants() do
