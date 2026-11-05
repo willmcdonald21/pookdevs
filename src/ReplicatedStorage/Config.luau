@@ -131,6 +131,37 @@ Config.Upgrades = {
 			return ("Walk at speed %d"):format(level.WalkSpeed)
 		end,
 	},
+	-- Helpers: level 1 means not hired. Delay is how long they wait before working.
+	{
+		Id = "Baker",
+		Name = "Baker Helper",
+		Levels = {
+			{},
+			{ Delay = 4, Cost = 2000 },
+			{ Delay = 1, Cost = 6000 },
+		},
+		Describe = function(level)
+			if not level.Delay then
+				return "Not hired yet"
+			end
+			return ("Bakes your last treat again %d seconds after the oven empties"):format(level.Delay)
+		end,
+	},
+	{
+		Id = "Stocker",
+		Name = "Stocker Helper",
+		Levels = {
+			{},
+			{ Delay = 6, Cost = 3500 },
+			{ Delay = 2, Cost = 9000 },
+		},
+		Describe = function(level)
+			if not level.Delay then
+				return "Not hired yet"
+			end
+			return ("Moves finished batches into your cases after %d seconds"):format(level.Delay)
+		end,
+	},
 }
 
 function Config.GetUpgrade(id)
@@ -145,7 +176,8 @@ end
 -- Placeable items. Costs are in Coins or Stars. Part positions are relative to the
 -- floor at the item's spot. Display cases hold treats at their Slots.
 -- An item with OnlyFor = { userId, ... } is a free gift for those accounts, and
--- nobody else can see or get it.
+-- nobody else can see or get it. An item with Pass = "<pass Id>" comes with that
+-- game pass, and everyone can see it in the Decorate menu.
 local CASE_PINK = rgb(240, 150, 175)
 local GLASS = rgb(210, 235, 245)
 
@@ -284,6 +316,138 @@ Config.Items = {
 			{ Kind = "Ball", Diameter = 0.8, Y = 4.3, Color = rgb(255, 235, 140), Material = Enum.Material.Neon },
 		},
 	},
+	{
+		Id = "RedCarpet",
+		Name = "Red Carpet",
+		Pass = "VIP",
+		Charm = 4,
+		Flat = true,
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(3.6, 0.1, 5.6), Y = 0.06, Color = rgb(190, 30, 50) },
+			{ Kind = "Box", Size = Vector3.new(0.25, 0.12, 5.6), X = -1.8, Y = 0.07, Color = rgb(255, 200, 70), Material = Enum.Material.Foil },
+			{ Kind = "Box", Size = Vector3.new(0.25, 0.12, 5.6), X = 1.8, Y = 0.07, Color = rgb(255, 200, 70), Material = Enum.Material.Foil },
+		},
+	},
+	{
+		Id = "VelvetRope",
+		Name = "Velvet Rope",
+		Pass = "VIP",
+		Charm = 4,
+		Parts = {
+			{ Kind = "Disc", Height = 0.2, Diameter = 1.2, X = -2, Y = 0.1, Color = rgb(255, 200, 70), Material = Enum.Material.Foil },
+			{ Kind = "Disc", Height = 0.2, Diameter = 1.2, X = 2, Y = 0.1, Color = rgb(255, 200, 70), Material = Enum.Material.Foil },
+			{ Kind = "Disc", Height = 3, Diameter = 0.4, X = -2, Y = 1.6, Color = rgb(255, 200, 70), Material = Enum.Material.Foil },
+			{ Kind = "Disc", Height = 3, Diameter = 0.4, X = 2, Y = 1.6, Color = rgb(255, 200, 70), Material = Enum.Material.Foil },
+			{ Kind = "Ball", Diameter = 0.6, X = -2, Y = 3.2, Color = rgb(255, 200, 70), Material = Enum.Material.Foil },
+			{ Kind = "Ball", Diameter = 0.6, X = 2, Y = 3.2, Color = rgb(255, 200, 70), Material = Enum.Material.Foil },
+			{ Kind = "Box", Size = Vector3.new(4, 0.3, 0.3), Y = 2.6, Color = rgb(190, 30, 50), Material = Enum.Material.Fabric },
+		},
+	},
+	{
+		Id = "PartyBunting",
+		Name = "Party Bunting",
+		Pass = "StarterPack",
+		Charm = 3,
+		Parts = {
+			{ Kind = "Disc", Height = 5, Diameter = 0.25, X = -2.2, Y = 2.5, Color = rgb(255, 255, 255) },
+			{ Kind = "Disc", Height = 5, Diameter = 0.25, X = 2.2, Y = 2.5, Color = rgb(255, 255, 255) },
+			{ Kind = "Box", Size = Vector3.new(4.4, 0.08, 0.08), Y = 4.8, Color = rgb(255, 255, 255) },
+			{ Kind = "Box", Size = Vector3.new(0.6, 0.7, 0.08), X = -1.5, Y = 4.4, Color = rgb(255, 150, 190) },
+			{ Kind = "Box", Size = Vector3.new(0.6, 0.7, 0.08), X = -0.5, Y = 4.4, Color = rgb(165, 200, 255) },
+			{ Kind = "Box", Size = Vector3.new(0.6, 0.7, 0.08), X = 0.5, Y = 4.4, Color = rgb(255, 215, 140) },
+			{ Kind = "Box", Size = Vector3.new(0.6, 0.7, 0.08), X = 1.5, Y = 4.4, Color = rgb(190, 230, 170) },
+		},
+	},
+	{
+		Id = "Fireplace",
+		Name = "Fireplace",
+		Pass = "CozyPack",
+		Charm = 4,
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(4.4, 3.6, 1.6), Y = 1.8, Color = rgb(170, 85, 70), Material = Enum.Material.Brick },
+			{ Kind = "Box", Size = Vector3.new(2.6, 2, 0.2), Y = 1.2, Z = -0.75, Color = rgb(45, 30, 30) },
+			{ Kind = "Ball", Diameter = 1, Y = 0.7, Z = -0.6, Color = rgb(255, 140, 40), Material = Enum.Material.Neon },
+			{ Kind = "Box", Size = Vector3.new(4.8, 0.3, 1.9), Y = 3.75, Color = rgb(150, 100, 70), Material = Enum.Material.Wood },
+		},
+	},
+	{
+		Id = "Bookshelf",
+		Name = "Bookshelf",
+		Pass = "CozyPack",
+		Charm = 4,
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(3.6, 5, 1.4), Y = 2.5, Color = rgb(150, 100, 70), Material = Enum.Material.Wood },
+			{ Kind = "Box", Size = Vector3.new(0.8, 1, 0.6), X = -1, Y = 1.3, Z = -0.45, Color = rgb(235, 120, 150) },
+			{ Kind = "Box", Size = Vector3.new(0.8, 1, 0.6), X = 0.1, Y = 1.3, Z = -0.45, Color = rgb(110, 175, 215) },
+			{ Kind = "Box", Size = Vector3.new(0.8, 1, 0.6), X = 1, Y = 2.8, Z = -0.45, Color = rgb(190, 230, 170) },
+			{ Kind = "Box", Size = Vector3.new(0.8, 1, 0.6), X = -0.4, Y = 2.8, Z = -0.45, Color = rgb(255, 215, 140) },
+			{ Kind = "Box", Size = Vector3.new(0.8, 1, 0.6), X = -1, Y = 4.2, Z = -0.45, Color = rgb(205, 175, 240) },
+			{ Kind = "Box", Size = Vector3.new(0.8, 1, 0.6), X = 0.6, Y = 4.2, Z = -0.45, Color = rgb(235, 120, 150) },
+		},
+	},
+	{
+		Id = "Armchair",
+		Name = "Armchair",
+		Pass = "CozyPack",
+		Charm = 4,
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(3, 1.2, 3), Y = 0.9, Color = rgb(235, 120, 150), Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(3, 2.6, 0.7), Y = 2.1, Z = 1.15, Color = rgb(235, 120, 150), Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(0.6, 1.8, 3), X = -1.5, Y = 1.4, Color = rgb(215, 100, 130), Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(0.6, 1.8, 3), X = 1.5, Y = 1.4, Color = rgb(215, 100, 130), Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(2.4, 0.4, 2.2), Y = 1.65, Z = -0.2, Color = rgb(255, 225, 200), Material = Enum.Material.Fabric },
+		},
+	},
+	{
+		Id = "ChristmasTree",
+		Name = "Christmas Tree",
+		Pass = "WinterPack",
+		Charm = 5,
+		Parts = {
+			{ Kind = "Disc", Height = 1, Diameter = 0.8, Y = 0.5, Color = rgb(120, 80, 55) },
+			{ Kind = "Disc", Height = 1.4, Diameter = 4.2, Y = 1.6, Color = rgb(60, 140, 80) },
+			{ Kind = "Disc", Height = 1.3, Diameter = 3.2, Y = 2.9, Color = rgb(70, 155, 90) },
+			{ Kind = "Disc", Height = 1.2, Diameter = 2.2, Y = 4.1, Color = rgb(80, 170, 100) },
+			{ Kind = "Disc", Height = 1, Diameter = 1.2, Y = 5.1, Color = rgb(90, 180, 110) },
+			{ Kind = "Ball", Diameter = 0.8, Y = 5.9, Color = rgb(255, 220, 90), Material = Enum.Material.Neon },
+			{ Kind = "Ball", Diameter = 0.45, X = 1.6, Y = 1.9, Z = -1, Color = rgb(215, 50, 70) },
+			{ Kind = "Ball", Diameter = 0.45, X = -1.2, Y = 3.1, Z = -0.9, Color = rgb(110, 175, 215) },
+			{ Kind = "Ball", Diameter = 0.45, X = 0.6, Y = 4.3, Z = -0.8, Color = rgb(255, 200, 70) },
+		},
+	},
+	{
+		Id = "Snowman",
+		Name = "Snowman",
+		Pass = "WinterPack",
+		Charm = 5,
+		Parts = {
+			{ Kind = "Ball", Diameter = 3, Y = 1.5, Color = rgb(250, 250, 255) },
+			{ Kind = "Ball", Diameter = 2.2, Y = 3.6, Color = rgb(250, 250, 255) },
+			{ Kind = "Ball", Diameter = 1.6, Y = 5.1, Color = rgb(250, 250, 255) },
+			{ Kind = "Box", Size = Vector3.new(0.25, 0.25, 0.9), Y = 5.1, Z = -0.9, Color = rgb(255, 140, 40) },
+			{ Kind = "Ball", Diameter = 0.2, X = -0.3, Y = 5.35, Z = -0.72, Color = rgb(30, 30, 30) },
+			{ Kind = "Ball", Diameter = 0.2, X = 0.3, Y = 5.35, Z = -0.72, Color = rgb(30, 30, 30) },
+			{ Kind = "Disc", Height = 0.15, Diameter = 1.6, Y = 5.85, Color = rgb(40, 35, 40) },
+			{ Kind = "Disc", Height = 0.9, Diameter = 1.1, Y = 6.35, Color = rgb(40, 35, 40) },
+			{ Kind = "Disc", Height = 0.25, Diameter = 2.3, Y = 4.4, Color = rgb(215, 50, 70), Material = Enum.Material.Fabric },
+		},
+	},
+	{
+		Id = "GingerbreadHouse",
+		Name = "Gingerbread House",
+		Pass = "WinterPack",
+		Charm = 5,
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(3.6, 2.6, 3.6), Y = 1.3, Color = rgb(170, 100, 55) },
+			{ Kind = "Box", Size = Vector3.new(4.2, 0.5, 4.2), Y = 2.85, Color = rgb(255, 250, 245) },
+			{ Kind = "Box", Size = Vector3.new(3.2, 0.5, 3.2), Y = 3.35, Color = rgb(170, 100, 55) },
+			{ Kind = "Box", Size = Vector3.new(2.2, 0.5, 2.2), Y = 3.85, Color = rgb(255, 250, 245) },
+			{ Kind = "Box", Size = Vector3.new(1.2, 0.5, 1.2), Y = 4.35, Color = rgb(170, 100, 55) },
+			{ Kind = "Box", Size = Vector3.new(1, 1.6, 0.1), Y = 0.8, Z = -1.85, Color = rgb(240, 150, 175) },
+			{ Kind = "Ball", Diameter = 0.4, X = -1.2, Y = 1.9, Z = -1.85, Color = rgb(215, 50, 70) },
+			{ Kind = "Ball", Diameter = 0.4, X = 1.2, Y = 1.9, Z = -1.85, Color = rgb(110, 200, 125) },
+		},
+	},
 }
 
 function Config.GetItem(id)
@@ -298,6 +462,57 @@ end
 function Config.IsAllowed(item, userId)
 	return item.OnlyFor == nil or table.find(item.OnlyFor, userId) ~= nil
 end
+
+-- Game passes bought once with Robux. GamePassId comes from Creator Hub, and 0 means
+-- it isn't on sale yet. Section groups them in the store.
+Config.Passes = {
+	{
+		Id = "DoubleCoins",
+		Name = "2x Coins",
+		GamePassId = 0,
+		Section = "Passes",
+		Detail = "Double coins from customers and deliveries, forever",
+	},
+	{
+		Id = "VIP",
+		Name = "VIP",
+		GamePassId = 0,
+		Section = "Passes",
+		Detail = "VIP tag, 2 VIP decorations, +1 Star every daily reward",
+	},
+	{
+		Id = "StarterPack",
+		Name = "Starter Pack",
+		GamePassId = 0,
+		Section = "Packs",
+		Detail = "1,000 coins, 15 Sugar Stars and Party Bunting",
+	},
+	{
+		Id = "CozyPack",
+		Name = "Cozy Pack",
+		GamePassId = 0,
+		Section = "Packs",
+		Detail = "Fireplace, Bookshelf and Armchair",
+	},
+	{
+		Id = "WinterPack",
+		Name = "Winter Pack",
+		GamePassId = 0,
+		Section = "Packs",
+		Detail = "Christmas Tree, Snowman and Gingerbread House",
+	},
+}
+
+function Config.GetPass(id)
+	for _, pass in Config.Passes do
+		if pass.Id == id then
+			return pass
+		end
+	end
+	return nil
+end
+
+Config.StarterPack = { Coins = 1000, Stars = 15 }
 
 Config.SpotCount = 16
 -- Each box holds one kind of treat, so keep this at or above the number of recipes.
@@ -333,7 +548,58 @@ Config.Products = {
 	{ Name = "Star Pouch", ProductId = 0, Currency = "Stars", Amount = 10 },
 	{ Name = "Star Jar", ProductId = 0, Currency = "Stars", Amount = 30 },
 	{ Name = "Star Chest", ProductId = 0, Currency = "Stars", Amount = 100 },
+	-- Amount is minutes of double coins. Buying again adds time.
+	{ Name = "2x Boost", ProductId = 0, Currency = "Boost", Amount = 15 },
 }
+
+-- Daily reward streak (days count in UTC). Missing a day starts again at day 1.
+Config.DailyRewards = {
+	{ Coins = 100 },
+	{ Coins = 200 },
+	{ Coins = 300 },
+	{ Coins = 400 },
+	{ Coins = 500 },
+	{ Coins = 600 },
+	{ Stars = 5 },
+}
+Config.VipDailyStars = 1
+
+-- Daily goals: DailyCount different kinds are picked each day. Each pays coins (the best
+-- unlocked recipe's price times CoinsPerPrice) plus Stars.
+Config.Goals = {
+	DailyCount = 3,
+	CoinsPerPrice = 30,
+	Stars = 1,
+	Kinds = {
+		{ Id = "Sell", Min = 15, Max = 30 },
+		{ Id = "SellRecipe", Min = 4, Max = 10 },
+		{ Id = "Ship", Min = 2, Max = 4 },
+		{ Id = "Bake", Min = 4, Max = 8 },
+	},
+}
+
+function Config.GetGoalKind(id)
+	for _, kind in Config.Goals.Kinds do
+		if kind.Id == id then
+			return kind
+		end
+	end
+	return nil
+end
+
+function Config.DescribeGoal(goal)
+	if goal.Kind == "Sell" then
+		return ("Sell %d treats"):format(goal.Target)
+	elseif goal.Kind == "SellRecipe" then
+		return ("Sell %d %ss"):format(goal.Target, Config.Recipes[goal.Recipe].Name)
+	elseif goal.Kind == "Ship" then
+		return ("Ship %d deliveries"):format(goal.Target)
+	end
+	return ("Bake %d batches"):format(goal.Target)
+end
+
+-- Customers keep buying from your cases while you're away, for up to this long.
+Config.OfflineMaxSeconds = 8 * 60 * 60
 
 -- Customers
 Config.CustomerInterval = 9
@@ -342,6 +608,8 @@ Config.CharmSpeedBonus = 0.06
 Config.MaxCustomers = 5
 Config.CustomerSpeed = 8
 Config.BrowseTime = 1.5
+-- Golden customers wear a crown, pay PayScale times the price, and sometimes tip a Star.
+Config.GoldenCustomer = { Chance = 1 / 12, PayScale = 3, StarChance = 1 / 3 }
 
 Config.AutosaveInterval = 60
 
