@@ -351,6 +351,26 @@ local function canShip(order)
 	return true
 end
 
+-- Returns text like "1 Butter, 2 Eggs" for what's missing, or nil when there's enough.
+local function missingIngredients(recipe)
+	local missing = {}
+	for _, ingredient in Config.Ingredients do
+		local need = recipe.Ingredients[ingredient.Id]
+		if need and state.Pantry[ingredient.Id] < need then
+			table.insert(missing, ("%d %s"):format(need - state.Pantry[ingredient.Id], ingredient.Name))
+		end
+	end
+	return #missing > 0 and table.concat(missing, ", ") or nil
+end
+
+local function pantrySummary()
+	local parts = {}
+	for _, ingredient in Config.Ingredients do
+		table.insert(parts, ("%s %d"):format(ingredient.Name, state.Pantry[ingredient.Id]))
+	end
+	return table.concat(parts, ", ")
+end
+
 local function placedCount(itemId)
 	local count = 0
 	for _, placedId in state.Placed do
@@ -394,7 +414,7 @@ function panels.Cookbook()
 	panelTitle.Text = "Cookbook"
 	addHeader("Recipes")
 	for index, recipe in Config.Recipes do
-		local detail = ("Sells for %d coins"):format(salePrice(recipe))
+		local detail = ("Sells for %d coins. Uses %s"):format(salePrice(recipe), Config.DescribeIngredients(recipe.Ingredients))
 		if index <= state.RecipesUnlocked then
 			addRow(recipe.Name, detail, { { Text = "Unlocked", Color = PINK } })
 		elseif index == state.RecipesUnlocked + 1 then
@@ -437,19 +457,25 @@ function panels.Bake()
 	panelTitle.Text = "What should we bake?"
 	local ovenTime = Config.GetUpgrade("Oven").Levels[state.Levels.Oven].BakeTime
 	local batch = Config.GetUpgrade("Batch").Levels[state.Levels.Batch].BatchSize
+	addRow("Your pantry", pantrySummary(), {})
 	for index = 1, state.RecipesUnlocked do
 		local recipe = Config.Recipes[index]
-		local detail = ("%d treats in %.1f seconds, %d coins each"):format(batch, ovenTime * recipe.BakeScale, salePrice(recipe))
-		addRow(recipe.Name, detail, {
-			{
-				Text = "Bake",
-				Color = GREEN,
-				OnClick = function()
-					bakeEvent:FireServer(index)
-					setPanel(nil)
-				end,
-			},
-		})
+		local title = ("%s: %d in %.1fs, %d coins each"):format(recipe.Name, batch, ovenTime * recipe.BakeScale, salePrice(recipe))
+		local missing = missingIngredients(recipe)
+		if missing then
+			addRow(title, "Missing " .. missing, { { Text = "Need more", Color = GREY } })
+		else
+			addRow(title, "Uses " .. Config.DescribeIngredients(recipe.Ingredients), {
+				{
+					Text = "Bake",
+					Color = GREEN,
+					OnClick = function()
+						bakeEvent:FireServer(index)
+						setPanel(nil)
+					end,
+				},
+			})
+		end
 	end
 end
 
