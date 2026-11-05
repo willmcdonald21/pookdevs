@@ -6,13 +6,15 @@
 | 2. Playable core | One plot per player, baking, customers, coins, upgrades, saving | Built |
 | 3. Real game | Five recipes, shop, tutorial, sounds, phone controls, walking customers | Built |
 | Redesign | Tray and display cases, customers shop on their own, decorations, Sugar Stars, deliveries, Robux store, hotbar | Built |
+| Engagement batch | Game passes (2x Coins, VIP, Starter, Cozy and Winter packs), 2x Boost, daily reward, offline sales, golden customers, daily goals, Baker and Stocker helpers. See `engagement-plan.md` | Built 2026-11-05 |
 | 4. Her version | Exclusive items (system built, none assigned yet), publish with limited access, first playtest | In progress |
 | 5. Public launch | Game passes and products, maturity questionnaire, icon, thumbnails, description, publish to 16+ | Not started |
 | 6. Grow | Creator Dashboard analytics, regular updates, seasonal events | Not started |
 
 ## Not yet verified
-- **Saving:** Studio's API access setting is still off.
-- **Purchases:** real purchases, session locks, and the Robux products, which haven't been created in Creator Hub yet.
+- **Saving:** Studio's API access setting is still off. Offline sales, the daily streak and the Starter Pack were tested with a temporary script that simulated a save.
+- **Purchases:** real purchases, session locks, and the game passes and products, which haven't been created in Creator Hub yet. Pass ownership was tested by granting passes from a test script.
+- **Prompts:** during the 2026-11-05 tests, Studio wouldn't show any proximity prompt, even a new test prompt. Collecting and stocking with E were checked in earlier sessions, not after this batch.
 - **Live play:** two players at once, a real phone, and a full playthrough at normal prices.
 
 ## Before launch
