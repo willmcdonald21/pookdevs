@@ -60,6 +60,31 @@ local function cleanStock(saved, capacity)
 	return stock
 end
 
+-- Goals for a day that has passed are replaced when the player next syncs.
+local function cleanGoals(saved)
+	local goals = { Day = 0, List = {} }
+	if type(saved) ~= "table" or type(saved.List) ~= "table" then
+		return goals
+	end
+	goals.Day = cleanCount(saved.Day)
+	for _, goal in saved.List do
+		if type(goal) == "table" and Config.GetGoalKind(goal.Kind) then
+			local recipe = cleanCount(goal.Recipe)
+			if goal.Kind ~= "SellRecipe" or Config.Recipes[recipe] then
+				table.insert(goals.List, {
+					Kind = goal.Kind,
+					Recipe = recipe,
+					Target = math.max(1, cleanCount(goal.Target)),
+					Progress = cleanCount(goal.Progress),
+					Reward = cleanCount(goal.Reward),
+					Claimed = goal.Claimed == true,
+				})
+			end
+		end
+	end
+	return goals
+end
+
 -- Tables with holes don't survive saving, so Placed and Stock use string keys.
 local function clean(saved)
 	saved = type(saved) == "table" and saved or {}
@@ -78,6 +103,7 @@ local function clean(saved)
 		LastSeen = cleanCount(saved.LastSeen),
 		DailyDay = cleanCount(saved.DailyDay),
 		DailyStreak = math.min(cleanCount(saved.DailyStreak), #Config.DailyRewards),
+		Goals = cleanGoals(saved.Goals),
 	}
 	if type(saved.Receipts) == "table" then
 		for _, receiptId in saved.Receipts do
