@@ -28,6 +28,7 @@ local newOrderEvent = ReplicatedStorage:WaitForChild("NewOrder")
 local selectSlotEvent = ReplicatedStorage:WaitForChild("SelectSlot")
 local popupEvent = ReplicatedStorage:WaitForChild("Popup")
 local claimDailyEvent = ReplicatedStorage:WaitForChild("ClaimDaily")
+local claimGoalEvent = ReplicatedStorage:WaitForChild("ClaimGoal")
 
 local PINK = Color3.fromRGB(240, 150, 175)
 local BROWN = Color3.fromRGB(90, 60, 70)
@@ -95,6 +96,8 @@ local decorButton = button("DecorButton", UDim2.fromOffset(120, 44), UDim2.fromO
 decorButton.Text = "Decorate"
 local deliveryButton = button("DeliveryButton", UDim2.fromOffset(120, 44), UDim2.fromOffset(10, 174), TOP_LEFT, BLUE)
 deliveryButton.Text = "Deliveries"
+local goalsButton = button("GoalsButton", UDim2.fromOffset(120, 44), UDim2.fromOffset(10, 222), TOP_LEFT, BLUE)
+goalsButton.Text = "Goals"
 local storeButton = button("StoreButton", UDim2.fromOffset(44, 68), UDim2.fromOffset(134, 6), TOP_LEFT, GREEN)
 storeButton.Text = "+"
 local hintLabel = label("Hint", UDim2.new(0.5, 0, 0, 32), UDim2.new(0.5, 0, 0, 6), TOP_CENTER, CREAM, BROWN)
@@ -531,6 +534,29 @@ function panels.Deliveries()
 	end
 end
 
+function panels.Goals()
+	panelTitle.Text = "Daily Goals"
+	for index, goal in state.Goals do
+		local detail = ("Reward: %d coins + %s"):format(goal.Reward, starText(Config.Goals.Stars))
+		local action
+		if goal.Claimed then
+			action = { Text = "Done", Color = GREY }
+		elseif goal.Progress >= goal.Target then
+			action = {
+				Text = "Claim",
+				Color = GREEN,
+				OnClick = function()
+					claimGoalEvent:FireServer(index)
+				end,
+			}
+		else
+			action = { Text = ("%d/%d"):format(goal.Progress, goal.Target), Color = BLUE }
+		end
+		addRow(Config.DescribeGoal(goal), detail, { action })
+	end
+	addRow("New goals every day", "Come back tomorrow for more", {})
+end
+
 -- Prices come from Roblox, so the store always shows what the player will really pay.
 local productPrices = {}
 local passPrices = {}
@@ -648,6 +674,9 @@ deliveryButton.Activated:Connect(function()
 end)
 storeButton.Activated:Connect(function()
 	togglePanel("Store")
+end)
+goalsButton.Activated:Connect(function()
+	togglePanel("Goals")
 end)
 closeButton.Activated:Connect(function()
 	setPanel(nil)
@@ -839,6 +868,14 @@ stateEvent.OnClientEvent:Connect(function(newState)
 	end
 	deliveryButton.BackgroundColor3 = ready and GREEN or BLUE
 	deliveryButton.Text = ready and "Deliveries!" or "Deliveries"
+	local goalReady = false
+	for _, goal in state.Goals do
+		if not goal.Claimed and goal.Progress >= goal.Target then
+			goalReady = true
+		end
+	end
+	goalsButton.BackgroundColor3 = goalReady and GREEN or BLUE
+	goalsButton.Text = goalReady and "Goals!" or "Goals"
 	for slot, entry in hotbarSlots do
 		local recipeIndex = state.Hotbar[slot]
 		if recipeIndex ~= entry.recipeIndex then
