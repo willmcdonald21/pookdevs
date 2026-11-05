@@ -453,6 +453,19 @@ function panels.Cookbook()
 	addRow("New goals every day", "Come back tomorrow for more", {})
 end
 
+function panels.Pantry()
+	panelTitle.Text = ("Pantry (holds %d of each)"):format(state.PantryCapacity)
+	for _, ingredient in Config.Ingredients do
+		local count = state.Pantry[ingredient.Id]
+		local detail = ("You have %d of %d"):format(count, state.PantryCapacity)
+		addRow(ingredient.Name, detail, { { Text = tostring(count), Color = count > 0 and GREEN or GREY } })
+	end
+	addHeader("Getting more")
+	addRow("Free delivery crate", ("Arrives outside your door every %d seconds"):format(Config.Crate.Interval), {})
+	addRow("Grocery store", ("On the town square: %d of anything for a few coins"):format(Config.GroceryBundle), {})
+	addRow("Bigger Pantry", "Buy it in the Shop to store more of each", {})
+end
+
 function panels.Bake()
 	panelTitle.Text = "What should we bake?"
 	local ovenTime = Config.GetUpgrade("Oven").Levels[state.Levels.Oven].BakeTime
