@@ -1,33 +1,36 @@
 # Creator Hub setup for purchases
 
-Every pass and product in the game shows **Soon** until it exists in Creator Hub and its ID is in `src/ReplicatedStorage/Config.luau`. Use the names exactly as written, because Claude matches them by name when filling in the IDs.
-
-Prices are suggestions based on similar games. The store always shows the price set in Creator Hub.
+All passes and products were created on 2026-11-05 through Roblox's Open Cloud API, and their IDs are in `src/ReplicatedStorage/Config.luau`. Prices can be changed in Creator Hub at any time. The in-game store always shows the price set there.
 
 ## Game passes
-Go to Creator Hub, then **Creations → Bakery Tycoon → Monetization → Passes**.
+| Name | Price | ID | What it gives |
+|---|---|---|---|
+| 2x Coins | 199 | 2072444566 | Double coins from customers and deliveries, permanently |
+| VIP | 149 | 2072630512 | VIP tag over the head and in chat, Red Carpet and Velvet Rope, +1 Star on each daily reward |
+| Starter Pack | 49 | 2068562637 | One time: 1,000 coins, 15 Sugar Stars, and Party Bunting |
+| Cozy Pack | 99 | 2070589101 | Fireplace, Bookshelf and Armchair |
+| Winter Pack | 149 | 2072654528 | Christmas Tree, Snowman and Gingerbread House. Take it off sale in January, and buyers keep the items |
 
-| Name | Suggested price | What it gives |
-|---|---|---|
-| 2x Coins | 199 | Double coins from customers and deliveries, permanently |
-| VIP | 149 | VIP tag over the head and in chat, Red Carpet and Velvet Rope, +1 Star on each daily reward |
-| Starter Pack | 49 | One time: 1,000 coins, 15 Sugar Stars, and Party Bunting |
-| Cozy Pack | 99 | Fireplace, Bookshelf and Armchair |
-| Winter Pack | 149 | Christmas Tree, Snowman and Gingerbread House. Take it off sale in January, and buyers keep the items |
+The game's creator owns every pass automatically, so the creator's account always plays with all of them.
 
 ## Developer products
-These can be bought again and again. Go to **Monetization → Developer Products**.
+These can be bought again and again.
 
-| Name | Suggested price | What it gives |
-|---|---|---|
-| Coin Bag | 25 | 500 coins |
-| Coin Sack | 75 | 2,000 coins |
-| Coin Chest | 199 | 6,000 coins |
-| Star Pouch | 25 | 10 Sugar Stars |
-| Star Jar | 65 | 30 Sugar Stars |
-| Star Chest | 199 | 100 Sugar Stars |
-| 2x Boost | 25 | Double coins for 15 minutes. Buying again adds 15 more |
+| Name | Price | ID | What it gives |
+|---|---|---|---|
+| Coin Bag | 25 | 3728575847 | 500 coins |
+| Coin Sack | 75 | 3728575849 | 2,000 coins |
+| Coin Chest | 199 | 3728575852 | 6,000 coins |
+| Star Pouch | 25 | 3728575854 | 10 Sugar Stars |
+| Star Jar | 65 | 3728575857 | 30 Sugar Stars |
+| Star Chest | 199 | 3728575858 | 100 Sugar Stars |
+| 2x Boost | 25 | 3728575863 | Double coins for 15 minutes. Buying again adds 15 more |
 
-## Then
-1. Turn on **File → Game Settings → Security → Enable Studio Access to API Services**, then click **Save**.
-2. With Studio open, ask Claude to fill in the IDs and run test purchases.
+## Creating more later
+1. Create an Open Cloud API key with the **game-pass** and **developer-product** APIs, each with read and write access, limited to Bakery Tycoon and your IP address. Saving changes to a key's permissions may generate a new key.
+2. Give the key to Claude through the clipboard, not in chat. Delete the key in Creator Hub when finished.
+3. Add the new item to `Config.Passes` or `Config.Products`, with its ID.
+
+## Tested
+- **Payout:** a simulated Roblox receipt for the Coin Bag paid 500 coins. It was saved to the real save with its receipt, and sending the same receipt again paid nothing.
+- **Purchase window:** not tested. Studio wouldn't show Roblox's purchase window during testing, so the first real check will be a purchase in the published game.
