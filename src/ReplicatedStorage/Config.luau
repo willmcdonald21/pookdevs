@@ -64,6 +64,10 @@ Config.Recipes = {
 	},
 }
 
+local function seconds(count)
+	return count == 1 and "1 second" or ("%d seconds"):format(count)
+end
+
 -- Level 1 of each upgrade is free. Cost is the price of reaching that level.
 Config.Upgrades = {
 	{
@@ -144,7 +148,7 @@ Config.Upgrades = {
 			if not level.Delay then
 				return "Not hired yet"
 			end
-			return ("Bakes your last treat again %d seconds after the oven empties"):format(level.Delay)
+			return ("Bakes your last treat again %s after the oven empties"):format(seconds(level.Delay))
 		end,
 	},
 	{
@@ -159,7 +163,7 @@ Config.Upgrades = {
 			if not level.Delay then
 				return "Not hired yet"
 			end
-			return ("Moves finished batches into your cases after %d seconds"):format(level.Delay)
+			return ("Moves finished batches into your cases after %s"):format(seconds(level.Delay))
 		end,
 	},
 }
