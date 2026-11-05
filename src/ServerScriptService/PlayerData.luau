@@ -73,6 +73,8 @@ local function clean(saved)
 		Placed = {},
 		Stock = {},
 		Receipts = {},
+		BoostUntil = cleanCount(saved.BoostUntil),
+		StarterPackClaimed = saved.StarterPackClaimed == true,
 	}
 	if type(saved.Receipts) == "table" then
 		for _, receiptId in saved.Receipts do
