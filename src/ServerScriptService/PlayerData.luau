@@ -105,6 +105,8 @@ local function clean(saved)
 		DailyStreak = math.min(cleanCount(saved.DailyStreak), #Config.DailyRewards),
 		Goals = cleanGoals(saved.Goals),
 	}
+	-- The Baker helper re-bakes this recipe. 0 means nothing has been baked yet.
+	data.LastRecipe = math.min(cleanCount(saved.LastRecipe), data.RecipesUnlocked)
 	if type(saved.Receipts) == "table" then
 		for _, receiptId in saved.Receipts do
 			if type(receiptId) == "string" then
