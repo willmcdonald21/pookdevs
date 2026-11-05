@@ -17,6 +17,7 @@ local PurchaseHandler = require(ServerScriptService:WaitForChild("PurchaseHandle
 local REACH_BUFFER = 8
 local PANEL_REACH = 25
 local CRATE_REACH = 16
+local GROCERY_REACH = 20
 local FIRST_CRATE_DELAY = 15
 local SLOT_ITEM_SCALE = 0.5
 local TRAY_ITEM_SCALE = 0.6
@@ -54,6 +55,7 @@ local popupEvent = remote("Popup")
 local claimDailyEvent = remote("ClaimDaily")
 local claimGoalEvent = remote("ClaimGoal")
 local unpackCrateEvent = remote("UnpackCrate")
+local buyGroceriesEvent = remote("BuyGroceries")
 
 local plots = {}
 local playerPlots = {}
@@ -810,6 +812,39 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id)
 			notify(player, item.Name .. " bought! Press Place to put it in your bakery", "Coin")
 		end
 	end
+end)
+
+-- Grocery store: shared by everyone on the town square.
+local groceryCounter = Workspace:WaitForChild("GroceryStore"):WaitForChild("Counter")
+
+groceryCounter:WaitForChild("Prompt").Triggered:Connect(function(player)
+	openPanelEvent:FireClient(player, "Grocery")
+end)
+
+-- Buys a bundle, or as much of one as fits in the pantry at the same price per item.
+buyGroceriesEvent.OnServerEvent:Connect(function(player, id)
+	local data = PlayerData.Get(player)
+	local ingredient = type(id) == "string" and Config.GetIngredient(id)
+	if not data or not ingredient then
+		return
+	end
+	if not isNear(player, groceryCounter.Position, GROCERY_REACH) then
+		notify(player, "Go to the grocery store counter to buy ingredients")
+		return
+	end
+	local space = pantryCapacity(data) - data.Pantry[id]
+	if space <= 0 then
+		notify(player, ("Your pantry has no room for more %s"):format(ingredient.Name))
+		return
+	end
+	local amount = math.min(Config.GroceryBundle, space)
+	local price = math.ceil(ingredient.BundlePrice * amount / Config.GroceryBundle)
+	if not buy(player, data, price) then
+		return
+	end
+	data.Pantry[id] += amount
+	syncStats(player)
+	notify(player, ("Bought %d %s for %d coins"):format(amount, ingredient.Name, price), "Coin")
 end)
 
 -- Deliveries
