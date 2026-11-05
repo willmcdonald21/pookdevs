@@ -69,6 +69,24 @@ local function salePrice(data, recipe)
 	return math.floor(recipe.Price * (1 + upgradeLevel(data, "Ingredients").PriceBonus))
 end
 
+-- 2x Coins and the timed boost each double coins earned from customers and deliveries.
+local function coinMultiplier(player, data)
+	local multiplier = 1
+	if PurchaseHandler.OwnsPass(player, "DoubleCoins") then
+		multiplier *= 2
+	end
+	if data.BoostUntil > os.time() then
+		multiplier *= 2
+	end
+	return multiplier
+end
+
+local function earn(player, data, amount)
+	local coins = amount * coinMultiplier(player, data)
+	data.Coins += coins
+	return coins
+end
+
 local function bakeTime(data, recipe)
 	return upgradeLevel(data, "Oven").BakeTime * recipe.BakeScale
 end
@@ -255,6 +273,9 @@ local function syncStats(player)
 		TrayCapacity = trayCapacity(data),
 		Hotbar = bar.Slots,
 		SelectedSlot = bar.Selected,
+		Passes = PurchaseHandler.OwnedPasses(player),
+		Multiplier = coinMultiplier(player, data),
+		BoostUntil = data.BoostUntil,
 		Owned = data.Owned,
 		Placed = data.Placed,
 		Charm = totalCharm(data),
@@ -606,7 +627,7 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id)
 		end
 	elseif kind == "Item" and type(id) == "string" then
 		local item = Config.GetItem(id)
-		if not item or item.OnlyFor then
+		if not item or item.OnlyFor or item.Pass then
 			return
 		end
 		local paid
@@ -711,7 +732,7 @@ shipEvent.OnServerEvent:Connect(function(player, slot)
 	for index, count in order.Items do
 		data.Tray[index] -= count
 	end
-	data.Coins += order.Coins
+	local earned = earn(player, data, order.Coins)
 	data.Stars += order.Stars
 	data.TutorialDone = true
 	queueOrder(plot, player, slot)
@@ -719,9 +740,9 @@ shipEvent.OnServerEvent:Connect(function(player, slot)
 	syncStats(player)
 	if order.Stars > 0 then
 		local starWord = order.Stars == 1 and "Sugar Star" or "Sugar Stars"
-		notify(player, ("Shipped! +%d coins, +%d %s"):format(order.Coins, order.Stars, starWord), "Coin")
+		notify(player, ("Shipped! +%d coins, +%d %s"):format(earned, order.Stars, starWord), "Coin")
 	else
-		notify(player, ("Shipped! +%d coins"):format(order.Coins), "Coin")
+		notify(player, ("Shipped! +%d coins"):format(earned), "Coin")
 	end
 end)
 
@@ -900,10 +921,9 @@ local function runCustomer(plot, session)
 			model:Destroy()
 			return
 		end
-		local price = salePrice(data, recipe)
-		data.Coins += price
+		local coins = earn(owner, data, salePrice(data, recipe))
 		syncStats(owner)
-		notify(owner, ("+%d coins: %s sold"):format(price, recipe.Name), "Coin")
+		notify(owner, ("+%d coins: %s sold"):format(coins, recipe.Name), "Coin")
 		say(label, "Thank you!")
 		task.wait(0.8)
 	else
@@ -1014,11 +1034,13 @@ local function releasePlot(player)
 	plot.customersFolder:ClearAllChildren()
 end
 
--- Gives exclusive items to their owners, and removes them from anyone else's save.
+-- Gives exclusive and game pass items to their owners, and removes them from anyone
+-- else's save.
 local function applyExclusiveItems(player, data)
 	for _, item in Config.Items do
-		if item.OnlyFor then
+		if item.OnlyFor or item.Pass then
 			local allowed = Config.IsAllowed(item, player.UserId)
+				and (not item.Pass or PurchaseHandler.OwnsPass(player, item.Pass))
 			data.Owned[item.Id] = allowed and 1 or 0
 			if not allowed then
 				for key, placedId in data.Placed do
@@ -1029,6 +1051,72 @@ local function applyExclusiveItems(player, data)
 			end
 		end
 	end
+end
+
+local function updateVipTag(player)
+	local head = player.Character and player.Character:FindFirstChild("Head")
+	if not head then
+		return
+	end
+	local tag = head:FindFirstChild("VipTag")
+	if player:GetAttribute("VIP") ~= true then
+		if tag then
+			tag:Destroy()
+		end
+		return
+	end
+	if tag then
+		return
+	end
+	tag = Instance.new("BillboardGui")
+	tag.Name = "VipTag"
+	tag.Size = UDim2.fromOffset(60, 24)
+	tag.StudsOffset = Vector3.new(0, 2.8, 0)
+	tag.MaxDistance = 60
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundColor3 = Color3.fromRGB(235, 175, 60)
+	label.Font = Enum.Font.FredokaOne
+	label.TextScaled = true
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.Text = "VIP"
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.4, 0)
+	corner.Parent = label
+	label.Parent = tag
+	tag.Parent = head
+end
+
+-- The Starter Pack pays out once per account, and only when progress can be saved,
+-- so it can't pay out again on a later visit.
+local function applyPassRewards(player, data)
+	if
+		PurchaseHandler.OwnsPass(player, "StarterPack")
+		and not data.StarterPackClaimed
+		and PlayerData.CanSave(player)
+	then
+		data.StarterPackClaimed = true
+		data.Coins += Config.StarterPack.Coins
+		data.Stars += Config.StarterPack.Stars
+		notify(
+			player,
+			("Starter Pack: +%d coins, +%d Sugar Stars"):format(Config.StarterPack.Coins, Config.StarterPack.Stars),
+			"Coin"
+		)
+	end
+	player:SetAttribute("VIP", PurchaseHandler.OwnsPass(player, "VIP"))
+	updateVipTag(player)
+end
+
+local function onPassGranted(player, pass)
+	local data = PlayerData.Get(player)
+	if not data then
+		return
+	end
+	applyExclusiveItems(player, data)
+	applyPassRewards(player, data)
+	syncStats(player)
+	notify(player, ("Thank you! %s unlocked"):format(pass.Name), "Coin")
 end
 
 local function onPlayerAdded(player)
@@ -1044,6 +1132,7 @@ local function onPlayerAdded(player)
 		task.defer(function()
 			sendToPlot(player, playerPlots[player])
 			applyWalkSpeed(player)
+			updateVipTag(player)
 			if PlayerData.Get(player) then
 				syncStats(player)
 			end
@@ -1055,7 +1144,12 @@ local function onPlayerAdded(player)
 	if not player.Parent then
 		return
 	end
+	PurchaseHandler.LoadPasses(player)
+	if not player.Parent then
+		return
+	end
 	applyExclusiveItems(player, data)
+	applyPassRewards(player, data)
 	if not loaded then
 		notify(player, "Your saved progress couldn't load, so this visit won't be saved.")
 	end
@@ -1128,9 +1222,13 @@ end)
 
 PurchaseHandler.Start(function(player, product)
 	syncStats(player)
+	if product.Currency == "Boost" then
+		notify(player, ("Thank you! Double coins for %d more minutes"):format(product.Amount), "Coin")
+		return
+	end
 	local unit = product.Currency == "Stars" and "Sugar Stars" or "coins"
 	notify(player, ("Thank you! +%d %s"):format(product.Amount, unit), "Coin")
-end)
+end, onPassGranted)
 
 Players.PlayerAdded:Connect(onPlayerAdded)
 for _, player in Players:GetPlayers() do
