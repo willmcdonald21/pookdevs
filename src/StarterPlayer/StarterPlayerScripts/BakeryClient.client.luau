@@ -7,6 +7,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
+local TextChatService = game:GetService("TextChatService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
@@ -281,6 +282,22 @@ local function addRow(title, detail, actions)
 	end
 end
 
+local function addHeader(text)
+	rowOrder += 1
+	local row = Instance.new("Frame")
+	row.Name = "Header"
+	row.Size = UDim2.new(1, -12, 0, 30)
+	row.BackgroundTransparency = 1
+	row.LayoutOrder = rowOrder
+	row.ZIndex = 6
+	row.Parent = rowList
+	local heading = label("Text", UDim2.fromScale(1, 1), UDim2.new(), TOP_LEFT, CREAM, BROWN, row)
+	heading.BackgroundTransparency = 1
+	heading.Text = text
+	heading.TextXAlignment = Enum.TextXAlignment.Left
+	heading.ZIndex = 7
+end
+
 local function clearRows()
 	for _, child in rowList:GetChildren() do
 		if child:IsA("Frame") then
@@ -421,6 +438,22 @@ function panels.Decorate()
 			local actions
 			if item.OnlyFor then
 				actions = { { Text = "Just for you", Color = PINK } }
+			elseif item.Pass then
+				local pass = Config.GetPass(item.Pass)
+				if state.Passes[item.Pass] then
+					actions = { { Text = pass.Name, Color = PINK } }
+				else
+					detail = ("Charm +%d. Comes with %s"):format(item.Charm, pass.Name)
+					actions = {
+						{
+							Text = "In Store",
+							Color = GOLD,
+							OnClick = function()
+								setPanel("Store")
+							end,
+						},
+					}
+				end
 			else
 				local priceText, canPay
 				if item.Stars then
@@ -498,6 +531,7 @@ end
 
 -- Prices come from Roblox, so the store always shows what the player will really pay.
 local productPrices = {}
+local passPrices = {}
 
 local function buyProduct(product)
 	local ok, err = pcall(function()
@@ -508,27 +542,62 @@ local function buyProduct(product)
 	end
 end
 
+local function buyPass(pass)
+	local ok, err = pcall(function()
+		MarketplaceService:PromptGamePassPurchase(player, pass.GamePassId)
+	end)
+	if not ok then
+		warn("Could not open purchase prompt: " .. tostring(err))
+	end
+end
+
+local function robuxAction(id, price, color, onClick)
+	if not state.CanBuy then
+		return { Text = "Unavailable", Color = GREY }
+	elseif id == 0 or not price then
+		return { Text = "Soon", Color = GREY }
+	end
+	return { Text = price .. " Robux", Color = color, OnClick = onClick }
+end
+
+local function productDetail(product)
+	if product.Currency == "Boost" then
+		local detail = ("Double coins for %d minutes"):format(product.Amount)
+		local left = state.BoostUntil - Workspace:GetServerTimeNow()
+		if left > 0 then
+			detail ..= (" (%d min left)"):format(math.ceil(left / 60))
+		end
+		return detail
+	end
+	local unit = product.Currency == "Stars" and "Sugar Stars" or "coins"
+	return ("%d %s"):format(product.Amount, unit)
+end
+
 function panels.Store()
 	panelTitle.Text = "Get More"
-	for _, product in Config.Products do
-		local unit = product.Currency == "Stars" and "Sugar Stars" or "coins"
-		local detail = ("%d %s"):format(product.Amount, unit)
-		local price = productPrices[product.ProductId]
-		local action
-		if not state.CanBuy then
-			action = { Text = "Unavailable", Color = GREY }
-		elseif product.ProductId == 0 or not price then
-			action = { Text = "Soon", Color = GREY }
-		else
-			action = {
-				Text = price .. " Robux",
-				Color = product.Currency == "Stars" and GOLD or GREEN,
-				OnClick = function()
-					buyProduct(product)
-				end,
-			}
+	for _, section in { "Passes", "Packs" } do
+		addHeader(section)
+		for _, pass in Config.Passes do
+			if pass.Section == section then
+				local action
+				if state.Passes[pass.Id] then
+					action = { Text = "Owned", Color = PINK }
+				else
+					action = robuxAction(pass.GamePassId, passPrices[pass.GamePassId], GOLD, function()
+						buyPass(pass)
+					end)
+				end
+				addRow(pass.Name, pass.Detail, { action })
+			end
 		end
-		addRow(product.Name, detail, { action })
+	end
+	addHeader("Coins, Stars and Boosts")
+	for _, product in Config.Products do
+		local color = product.Currency == "Coins" and GREEN or GOLD
+		local action = robuxAction(product.ProductId, productPrices[product.ProductId], color, function()
+			buyProduct(product)
+		end)
+		addRow(product.Name, productDetail(product), { action })
 	end
 end
 
@@ -582,17 +651,26 @@ closeButton.Activated:Connect(function()
 	setPanel(nil)
 end)
 
+local function loadPrice(id, infoType, prices)
+	task.spawn(function()
+		local ok, info = pcall(function()
+			return MarketplaceService:GetProductInfo(id, infoType)
+		end)
+		if ok and info.IsForSale then
+			prices[id] = info.PriceInRobux
+			refreshPanel()
+		end
+	end)
+end
+
 for _, product in Config.Products do
 	if product.ProductId ~= 0 then
-		task.spawn(function()
-			local ok, info = pcall(function()
-				return MarketplaceService:GetProductInfo(product.ProductId, Enum.InfoType.Product)
-			end)
-			if ok and info.IsForSale then
-				productPrices[product.ProductId] = info.PriceInRobux
-				refreshPanel()
-			end
-		end)
+		loadPrice(product.ProductId, Enum.InfoType.Product, productPrices)
+	end
+end
+for _, pass in Config.Passes do
+	if pass.GamePassId ~= 0 then
+		loadPrice(pass.GamePassId, Enum.InfoType.GamePass, passPrices)
 	end
 end
 openPanelEvent.OnClientEvent:Connect(setPanel)
@@ -746,7 +824,8 @@ end)
 -- State updates
 stateEvent.OnClientEvent:Connect(function(newState)
 	state = newState
-	coinsLabel.Text = ("%d coins"):format(state.Coins)
+	local multiplierText = state.Multiplier > 1 and (" x%d"):format(state.Multiplier) or ""
+	coinsLabel.Text = ("%d coins%s"):format(state.Coins, multiplierText)
 	starsLabel.Text = starText(state.Stars)
 	shopButton.BackgroundColor3 = state.CanAfford and GREEN or PINK
 	shopButton.Text = state.CanAfford and "Shop!" or "Shop"
@@ -898,6 +977,17 @@ for _, plot in plotsFolder:GetChildren() do
 	end)
 end
 refreshGuide()
+
+-- VIP chat tag
+TextChatService.OnIncomingMessage = function(message)
+	local properties = Instance.new("TextChatMessageProperties")
+	local source = message.TextSource
+	local speaker = source and Players:GetPlayerByUserId(source.UserId)
+	if speaker and speaker:GetAttribute("VIP") == true then
+		properties.PrefixText = '<font color="#EBAF3C">[VIP]</font> ' .. message.PrefixText
+	end
+	return properties
+end
 
 -- Customer walking
 local SWING_ANGLE = math.rad(35)
