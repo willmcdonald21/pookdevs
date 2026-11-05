@@ -410,6 +410,13 @@ local function setOvenWindow(plot, color, material)
 	plot.window.Material = material
 end
 
+local function setBurners(plot, on)
+	for _, burner in plot.burners do
+		burner.Color = on and Color3.fromRGB(255, 90, 40) or Color3.fromRGB(85, 80, 85)
+		burner.Material = on and Enum.Material.Neon or Enum.Material.SmoothPlastic
+	end
+end
+
 local function resetOven(plot)
 	plot.ovenState = "idle"
 	plot.bakeRecipe = nil
@@ -421,6 +428,7 @@ local function resetOven(plot)
 	plot.ovenStatus.Text = ""
 	plot.smoke.Enabled = false
 	setOvenWindow(plot, Color3.fromRGB(70, 50, 60), Enum.Material.Glass)
+	setBurners(plot, false)
 end
 
 local function startBake(plot, player, recipe)
@@ -434,6 +442,7 @@ local function startBake(plot, player, recipe)
 	plot.ovenPrompt.HoldDuration = 0.5
 	plot.smoke.Enabled = true
 	setOvenWindow(plot, Color3.fromRGB(255, 150, 60), Enum.Material.Neon)
+	setBurners(plot, true)
 	data.LastRecipe = table.find(Config.Recipes, recipe)
 	addGoalProgress(data, "Bake")
 	syncStats(player)
@@ -457,6 +466,7 @@ local function startBake(plot, player, recipe)
 		plot.ovenStatus.Text = "Ready!"
 		plot.smoke.Enabled = false
 		setOvenWindow(plot, Color3.fromRGB(255, 225, 130), Enum.Material.Neon)
+		setBurners(plot, false)
 		notify(player, nil, "Ding")
 		updateGuide(player)
 	end)
@@ -1482,6 +1492,7 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		orders = {},
 		orderTokens = {},
 		window = model.Oven.Window,
+		burners = model.Oven.Burners:GetChildren(),
 		smoke = model.Oven.Chimney.Smoke,
 		ovenPrompt = body.Prompt,
 		ovenStatus = body.Status.Label,
