@@ -30,6 +30,7 @@ local popupEvent = ReplicatedStorage:WaitForChild("Popup")
 local claimDailyEvent = ReplicatedStorage:WaitForChild("ClaimDaily")
 local claimGoalEvent = ReplicatedStorage:WaitForChild("ClaimGoal")
 local unpackCrateEvent = ReplicatedStorage:WaitForChild("UnpackCrate")
+local buyGroceriesEvent = ReplicatedStorage:WaitForChild("BuyGroceries")
 
 local PINK = Color3.fromRGB(240, 150, 175)
 local BROWN = Color3.fromRGB(90, 60, 70)
@@ -465,6 +466,31 @@ function panels.Pantry()
 	addRow("Free delivery crate", ("Arrives outside your door every %d seconds"):format(Config.Crate.Interval), {})
 	addRow("Grocery store", ("On the town square: %d of anything for a few coins"):format(Config.GroceryBundle), {})
 	addRow("Bigger Pantry", "Buy it in the Shop to store more of each", {})
+end
+
+function panels.Grocery()
+	panelTitle.Text = "Grocery Store"
+	addHeader(("Bundles of %d. Your pantry holds %d of each"):format(Config.GroceryBundle, state.PantryCapacity))
+	for _, ingredient in Config.Ingredients do
+		local have = state.Pantry[ingredient.Id]
+		local amount = math.min(Config.GroceryBundle, state.PantryCapacity - have)
+		local detail = ("You have %d of %d"):format(have, state.PantryCapacity)
+		if amount <= 0 then
+			addRow(ingredient.Name, detail, { { Text = "Full", Color = GREY } })
+		else
+			-- Same price per item as the server charges for a partly full pantry.
+			local price = math.ceil(ingredient.BundlePrice * amount / Config.GroceryBundle)
+			addRow(("%s x%d"):format(ingredient.Name, amount), detail, {
+				{
+					Text = price .. " coins",
+					Color = state.Coins >= price and GREEN or GREY,
+					OnClick = function()
+						buyGroceriesEvent:FireServer(ingredient.Id)
+					end,
+				},
+			})
+		end
+	end
 end
 
 function panels.Bake()
