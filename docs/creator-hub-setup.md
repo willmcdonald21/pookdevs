@@ -1,6 +1,6 @@
 # Creator Hub setup for purchases
 
-Every pass and product in the game shows **Soon** until it exists in Creator Hub and its ID is in `src/ReplicatedStorage/Config.luau`. Use the names exactly as written. The game finds each one by name the first time, so the IDs can be filled in.
+Every pass and product in the game shows **Soon** until it exists in Creator Hub and its ID is in `src/ReplicatedStorage/Config.luau`. Use the names exactly as written, because Claude matches them by name when filling in the IDs.
 
 Prices are suggestions based on similar games. The store always shows the price set in Creator Hub.
 
