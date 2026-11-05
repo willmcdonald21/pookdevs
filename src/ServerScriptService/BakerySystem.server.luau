@@ -47,6 +47,8 @@ local placeEvent = remote("Place")
 local shipEvent = remote("Ship")
 local newOrderEvent = remote("NewOrder")
 local selectSlotEvent = remote("SelectSlot")
+local popupEvent = remote("Popup")
+local claimDailyEvent = remote("ClaimDaily")
 
 local plots = {}
 local playerPlots = {}
@@ -85,6 +87,11 @@ local function earn(player, data, amount)
 	local coins = amount * coinMultiplier(player, data)
 	data.Coins += coins
 	return coins
+end
+
+-- Days are counted in UTC, so everyone's new day starts at the same moment.
+local function today()
+	return os.time() // 86400
 end
 
 local function bakeTime(data, recipe)
@@ -1108,6 +1115,76 @@ local function applyPassRewards(player, data)
 	updateVipTag(player)
 end
 
+-- Customers keep shopping while the owner is away, but only from treats left in cases.
+local function sellWhileAway(player, data)
+	if data.LastSeen == 0 then
+		return
+	end
+	local away = math.clamp(os.time() - data.LastSeen, 0, Config.OfflineMaxSeconds)
+	local visits = math.floor(away / customerInterval(data))
+	local sold, coins = 0, 0
+	while sold < visits do
+		local stocked = {}
+		for _, stock in data.Stock do
+			if #stock > 0 then
+				table.insert(stocked, stock)
+			end
+		end
+		if #stocked == 0 then
+			break
+		end
+		local stock = stocked[math.random(#stocked)]
+		local recipeIndex = table.remove(stock, math.random(#stock))
+		coins += salePrice(data, Config.Recipes[recipeIndex])
+		sold += 1
+	end
+	if sold > 0 then
+		popupEvent:FireClient(player, "Away", { Sold = sold, Coins = earn(player, data, coins) })
+	end
+end
+
+-- Returns which streak day can be claimed today, or nil if today's reward is taken.
+local function dailyStreakDay(data)
+	local day = today()
+	if data.DailyDay >= day then
+		return nil
+	end
+	if data.DailyDay == day - 1 then
+		return data.DailyStreak % #Config.DailyRewards + 1
+	end
+	return 1
+end
+
+-- Only offered when progress can be saved, so a failed load can't hand it out again.
+local function offerDaily(player, data)
+	local streakDay = PlayerData.CanSave(player) and dailyStreakDay(data)
+	if streakDay then
+		popupEvent:FireClient(player, "Daily", {
+			Day = streakDay,
+			Vip = PurchaseHandler.OwnsPass(player, "VIP"),
+		})
+	end
+end
+
+claimDailyEvent.OnServerEvent:Connect(function(player)
+	local data = PlayerData.Get(player)
+	local streakDay = data and PlayerData.CanSave(player) and dailyStreakDay(data)
+	if not streakDay then
+		return
+	end
+	local reward = Config.DailyRewards[streakDay]
+	local stars = reward.Stars or 0
+	if PurchaseHandler.OwnsPass(player, "VIP") then
+		stars += Config.VipDailyStars
+	end
+	data.Coins += reward.Coins or 0
+	data.Stars += stars
+	data.DailyDay = today()
+	data.DailyStreak = streakDay
+	syncStats(player)
+	notify(player, ("Day %d reward claimed!"):format(streakDay), "Coin")
+end)
+
 local function onPassGranted(player, pass)
 	local data = PlayerData.Get(player)
 	if not data then
@@ -1153,12 +1230,14 @@ local function onPlayerAdded(player)
 	if not loaded then
 		notify(player, "Your saved progress couldn't load, so this visit won't be saved.")
 	end
+	sellWhileAway(player, data)
 
 	local plot = claimPlot(player)
 	syncStats(player)
 	sendToPlot(player, plot)
 	applyWalkSpeed(player)
 	player:SetAttribute("ShowWelcome", not data.TutorialDone)
+	offerDaily(player, data)
 end
 
 for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
