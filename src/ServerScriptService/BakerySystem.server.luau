@@ -165,11 +165,12 @@ local function totalCharm(data)
 	return charm
 end
 
-local function canAffordSomething(data)
+local function canUnlockRecipe(data)
 	local nextRecipe = Config.Recipes[data.RecipesUnlocked + 1]
-	if nextRecipe and data.Coins >= nextRecipe.UnlockCost then
-		return true
-	end
+	return nextRecipe ~= nil and data.Coins >= nextRecipe.UnlockCost
+end
+
+local function canAffordUpgrade(data)
 	for _, upgrade in Config.Upgrades do
 		local nextLevel = upgrade.Levels[data[upgrade.Id .. "Level"] + 1]
 		if nextLevel and data.Coins >= nextLevel.Cost then
@@ -366,7 +367,8 @@ local function syncStats(player)
 		Placed = data.Placed,
 		Charm = totalCharm(data),
 		Orders = orders,
-		CanAfford = canAffordSomething(data),
+		CanAfford = canAffordUpgrade(data),
+		CanUnlockRecipe = canUnlockRecipe(data),
 		CanBuy = PlayerData.CanSave(player),
 	})
 	updateCarriedTray(player, data)
@@ -1198,7 +1200,7 @@ local function claimPlot(player)
 			playerPlots[player] = plot
 			resetOven(plot)
 			setActive(plot.ovenPrompt, true)
-			setActive(plot.shopPrompt, true)
+			setActive(plot.cookbookPrompt, true)
 			setActive(plot.packingPrompt, true)
 			local baseCFrame = plot.model.DisplayCase.Base.CFrame
 			addCase(
@@ -1241,7 +1243,7 @@ local function releasePlot(player)
 	plot.signLabel.Text = "Empty Bakery"
 	resetOven(plot)
 	setActive(plot.ovenPrompt, false)
-	setActive(plot.shopPrompt, false)
+	setActive(plot.cookbookPrompt, false)
 	setActive(plot.packingPrompt, false)
 	for _, case in plot.cases do
 		case.connection:Disconnect()
@@ -1496,7 +1498,7 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		smoke = model.Oven.Chimney.Smoke,
 		ovenPrompt = body.Prompt,
 		ovenStatus = body.Status.Label,
-		shopPrompt = model.UpgradeStation.Prompt,
+		cookbookPrompt = model.UpgradeStation.Prompt,
 		packingTable = model.PackingTable,
 		packingPrompt = model.PackingTable.Prompt,
 		hatch = model.Hatch,
@@ -1515,15 +1517,15 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		plot.orderTokens[slot] = 0
 	end
 	setActive(plot.ovenPrompt, false)
-	setActive(plot.shopPrompt, false)
+	setActive(plot.cookbookPrompt, false)
 	setActive(plot.packingPrompt, false)
 	setActive(model.DisplayCase.Base.Prompt, false)
 	plot.ovenPrompt.Triggered:Connect(function(player)
 		onOvenPrompt(plot, player)
 	end)
-	plot.shopPrompt.Triggered:Connect(function(player)
-		if canUse(player, plot, plot.shopPrompt) then
-			openPanelEvent:FireClient(player, "Shop")
+	plot.cookbookPrompt.Triggered:Connect(function(player)
+		if canUse(player, plot, plot.cookbookPrompt) then
+			openPanelEvent:FireClient(player, "Cookbook")
 		end
 	end)
 	plot.packingPrompt.Triggered:Connect(function(player)
