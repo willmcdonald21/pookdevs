@@ -55,6 +55,7 @@ local plots = {}
 local playerPlots = {}
 local carriedTrays = {}
 local hotbars = {}
+local refreshHelpers
 
 local function notify(player, text, sound)
 	notifyEvent:FireClient(player, text, sound)
@@ -373,6 +374,7 @@ local function resetOven(plot)
 	plot.bakeRecipe = nil
 	plot.ovenCount = 0
 	plot.finishNow = false
+	plot.ovenChangedAt = os.clock()
 	plot.ovenPrompt.ActionText = "Bake"
 	plot.ovenPrompt.HoldDuration = 0
 	plot.ovenStatus.Text = ""
@@ -391,6 +393,7 @@ local function startBake(plot, player, recipe)
 	plot.ovenPrompt.HoldDuration = 0.5
 	plot.smoke.Enabled = true
 	setOvenWindow(plot, Color3.fromRGB(255, 150, 60), Enum.Material.Neon)
+	data.LastRecipe = table.find(Config.Recipes, recipe)
 	addGoalProgress(data, "Bake")
 	syncStats(player)
 
@@ -407,6 +410,7 @@ local function startBake(plot, player, recipe)
 			return
 		end
 		plot.ovenState = "ready"
+		plot.ovenChangedAt = os.clock()
 		plot.ovenPrompt.ActionText = ("Collect %d %s"):format(plot.ovenCount, recipe.Name)
 		plot.ovenPrompt.HoldDuration = 0
 		plot.ovenStatus.Text = "Ready!"
@@ -667,6 +671,7 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id)
 		if nextLevel and buy(player, data, nextLevel.Cost) then
 			data[key] += 1
 			applyWalkSpeed(player)
+			refreshHelpers(plot, data)
 			syncStats(player)
 			notify(player, upgrade.Name .. " upgraded!", "Coin")
 		end
@@ -1049,6 +1054,79 @@ local function runCustomerSpawner(plot, session, player)
 	end
 end
 
+-- Helpers
+local HELPER_APRON = Color3.fromRGB(255, 255, 255)
+local HELPERS = { "Baker", "Stocker" }
+
+-- Baker stands beside the oven and Stocker beside the starter case, on the room side.
+local function helperSpot(plot, id)
+	local target = id == "Baker" and plot.ovenPrompt.Parent or plot.model.DisplayCase.Base
+	local floor = plot.model.Floor
+	local inward = ((floor.Position - target.Position) * Vector3.new(1, 0, 1)).Unit
+	local side = inward:Cross(Vector3.yAxis)
+	local position = target.Position + inward * 3 + side * 4
+	position = Vector3.new(position.X, floor.Position.Y + floor.Size.Y / 2 + 3, position.Z)
+	return CFrame.lookAt(position, position + inward)
+end
+
+refreshHelpers = function(plot, data)
+	for _, id in HELPERS do
+		local hired = upgradeLevel(data, id).Delay ~= nil
+		if hired and not plot.helpersFolder:FindFirstChild(id) then
+			local model, label = buildPerson(id, HELPER_APRON, SKIN_COLORS[math.random(#SKIN_COLORS)])
+			say(label, id)
+			model:PivotTo(helperSpot(plot, id))
+			model.Parent = plot.helpersFolder
+		end
+	end
+end
+
+-- Moves a finished batch straight from the oven into cases with room.
+local function stockFromOven(plot, data)
+	local recipeIndex = table.find(Config.Recipes, plot.bakeRecipe)
+	local changed = {}
+	for key, case in plot.cases do
+		local stock = data.Stock[key]
+		while plot.ovenCount > 0 and #stock < #case.slots do
+			table.insert(stock, recipeIndex)
+			plot.ovenCount -= 1
+			changed[key] = true
+		end
+	end
+	for key in changed do
+		refreshCase(plot, data, key)
+	end
+	return next(changed) ~= nil
+end
+
+local function runHelpers(plot, session, player)
+	while plot.session == session do
+		task.wait(0.5)
+		local data = PlayerData.Get(player)
+		if plot.session ~= session or not data then
+			return
+		end
+		local waited = os.clock() - plot.ovenChangedAt
+		local stocker = upgradeLevel(data, "Stocker")
+		local baker = upgradeLevel(data, "Baker")
+		if plot.ovenState == "ready" and stocker.Delay and waited >= stocker.Delay then
+			if stockFromOven(plot, data) then
+				if plot.ovenCount == 0 then
+					resetOven(plot)
+				else
+					plot.ovenPrompt.ActionText = ("Collect %d %s"):format(plot.ovenCount, plot.bakeRecipe.Name)
+				end
+				syncStats(player)
+			end
+		elseif plot.ovenState == "idle" and baker.Delay and waited >= baker.Delay then
+			local recipe = Config.Recipes[data.LastRecipe]
+			if recipe then
+				startBake(plot, player, recipe)
+			end
+		end
+	end
+end
+
 -- Plots
 local function sendToPlot(player, plot)
 	local character = player.Character
@@ -1091,6 +1169,8 @@ local function claimPlot(player)
 				fillOrder(plot, data, slot)
 			end
 			task.spawn(runCustomerSpawner, plot, plot.session, player)
+			refreshHelpers(plot, data)
+			task.spawn(runHelpers, plot, plot.session, player)
 			return plot
 		end
 	end
@@ -1121,6 +1201,7 @@ local function releasePlot(player)
 	plot.orders = {}
 	plot.placedFolder:ClearAllChildren()
 	plot.customersFolder:ClearAllChildren()
+	plot.helpersFolder:ClearAllChildren()
 end
 
 -- Gives exclusive and game pass items to their owners, and removes them from anyone
@@ -1343,6 +1424,9 @@ end
 for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 	local body = model.Oven.Body
 	local floor = model.Floor
+	local helpersFolder = Instance.new("Folder")
+	helpersFolder.Name = "Helpers"
+	helpersFolder.Parent = model
 	local plot = {
 		model = model,
 		owner = nil,
@@ -1352,6 +1436,7 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		bakeRecipe = nil,
 		ovenCount = 0,
 		finishNow = false,
+		ovenChangedAt = 0,
 		cases = {},
 		orders = {},
 		orderTokens = {},
@@ -1372,6 +1457,7 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		counterRight = floor.CFrame.RightVector,
 		door = floor.CFrame * CFrame.new(0, 0.6, 19),
 		customersFolder = model.Customers,
+		helpersFolder = helpersFolder,
 	}
 	for slot in Config.DeliveryTiers do
 		plot.orderTokens[slot] = 0
