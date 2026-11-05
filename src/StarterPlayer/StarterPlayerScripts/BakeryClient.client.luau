@@ -26,6 +26,8 @@ local placeEvent = ReplicatedStorage:WaitForChild("Place")
 local shipEvent = ReplicatedStorage:WaitForChild("Ship")
 local newOrderEvent = ReplicatedStorage:WaitForChild("NewOrder")
 local selectSlotEvent = ReplicatedStorage:WaitForChild("SelectSlot")
+local popupEvent = ReplicatedStorage:WaitForChild("Popup")
+local claimDailyEvent = ReplicatedStorage:WaitForChild("ClaimDaily")
 
 local PINK = Color3.fromRGB(240, 150, 175)
 local BROWN = Color3.fromRGB(90, 60, 70)
@@ -873,41 +875,100 @@ end
 player:GetAttributeChangedSignal("Hint"):Connect(refreshHint)
 refreshHint()
 
--- Welcome screen
+-- Popups show one at a time, in the order they arrive.
+local popupQueue = {}
+local popupOpen = false
+
+local function showNextPopup()
+	if popupOpen or #popupQueue == 0 then
+		return
+	end
+	popupOpen = true
+	local info = table.remove(popupQueue, 1)
+	local popup = style(
+		Instance.new("Frame"),
+		"Popup",
+		UDim2.fromScale(0.8, 0.8),
+		UDim2.fromScale(0.5, 0.5),
+		Vector2.new(0.5, 0.5),
+		CREAM
+	)
+	popup.ZIndex = 10
+	popup.Parent = gui
+	local limit = Instance.new("UISizeConstraint")
+	limit.MaxSize = Vector2.new(540, 360)
+	limit.Parent = popup
+	local title = label("Title", UDim2.new(1, -20, 0.18, 0), UDim2.fromScale(0.5, 0.03), TOP_CENTER, CREAM, BROWN, popup)
+	title.Text = info.Title
+	title.ZIndex = 11
+	local body = label("Body", UDim2.new(1, -30, 0.55, 0), UDim2.fromScale(0.5, 0.22), TOP_CENTER, CREAM, BROWN, popup)
+	body.Text = info.Body
+	body.ZIndex = 11
+	local ok = button("Ok", UDim2.fromOffset(150, 46), UDim2.fromScale(0.5, 0.97), Vector2.new(0.5, 1), GREEN, popup)
+	ok.Text = info.Button
+	ok.ZIndex = 11
+	ok.Activated:Connect(function()
+		popup:Destroy()
+		popupOpen = false
+		if info.OnClose then
+			info.OnClose()
+		end
+		showNextPopup()
+	end)
+end
+
+local function queuePopup(title, body, buttonText, onClose)
+	table.insert(popupQueue, { Title = title, Body = body, Button = buttonText, OnClose = onClose })
+	showNextPopup()
+end
+
 local welcomeShown = false
 local function showWelcome()
 	if welcomeShown or player:GetAttribute("ShowWelcome") ~= true then
 		return
 	end
 	welcomeShown = true
-	local welcome = style(
-		Instance.new("Frame"),
-		"Welcome",
-		UDim2.fromScale(0.8, 0.8),
-		UDim2.fromScale(0.5, 0.5),
-		Vector2.new(0.5, 0.5),
-		CREAM
+	queuePopup(
+		"Welcome to your bakery!",
+		"1. Bake treats at the oven\n2. Put them in a display case\n3. Customers shop and pay you\n4. Pack deliveries for big rewards and Sugar Stars\nBuy cases and decorations to grow your bakery!",
+		"Let's bake!"
 	)
-	welcome.ZIndex = 10
-	welcome.Parent = gui
-	local limit = Instance.new("UISizeConstraint")
-	limit.MaxSize = Vector2.new(540, 360)
-	limit.Parent = welcome
-	local title = label("Title", UDim2.new(1, -20, 0.18, 0), UDim2.fromScale(0.5, 0.03), TOP_CENTER, CREAM, BROWN, welcome)
-	title.Text = "Welcome to your bakery!"
-	title.ZIndex = 11
-	local body = label("Body", UDim2.new(1, -30, 0.55, 0), UDim2.fromScale(0.5, 0.22), TOP_CENTER, CREAM, BROWN, welcome)
-	body.Text = "1. Bake treats at the oven\n2. Put them in a display case\n3. Customers shop and pay you\n4. Pack deliveries for big rewards and Sugar Stars\nBuy cases and decorations to grow your bakery!"
-	body.ZIndex = 11
-	local ok = button("Start", UDim2.fromOffset(150, 46), UDim2.fromScale(0.5, 0.97), Vector2.new(0.5, 1), GREEN, welcome)
-	ok.Text = "Let's bake!"
-	ok.ZIndex = 11
-	ok.Activated:Connect(function()
-		welcome:Destroy()
-	end)
 end
 player:GetAttributeChangedSignal("ShowWelcome"):Connect(showWelcome)
 showWelcome()
+
+local function rewardText(reward, isVip)
+	local parts = {}
+	if reward.Coins then
+		table.insert(parts, reward.Coins .. " coins")
+	end
+	local stars = (reward.Stars or 0) + (isVip and Config.VipDailyStars or 0)
+	if stars > 0 then
+		table.insert(parts, starText(stars))
+	end
+	return table.concat(parts, " + ")
+end
+
+popupEvent.OnClientEvent:Connect(function(kind, info)
+	if kind == "Daily" then
+		local tomorrow = Config.DailyRewards[info.Day % #Config.DailyRewards + 1]
+		local body = ("Day %d of %d\n\nToday: %s\nTomorrow: %s\n\nCome back every day to keep your streak!"):format(
+			info.Day,
+			#Config.DailyRewards,
+			rewardText(Config.DailyRewards[info.Day], info.Vip),
+			rewardText(tomorrow, info.Vip)
+		)
+		queuePopup("Daily Reward", body, "Claim", function()
+			claimDailyEvent:FireServer()
+		end)
+	elseif kind == "Away" then
+		local body = ("Customers bought %d treats from your cases while you were away.\n\n+%d coins"):format(
+			info.Sold,
+			info.Coins
+		)
+		queuePopup("Welcome back!", body, "Yay!")
+	end
+end)
 
 -- Prompts
 local function refreshPrompt(prompt)
