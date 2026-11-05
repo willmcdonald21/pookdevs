@@ -17,6 +17,7 @@ local PurchaseHandler = require(ServerScriptService:WaitForChild("PurchaseHandle
 local REACH_BUFFER = 8
 local PANEL_REACH = 25
 local SLOT_ITEM_SCALE = 0.5
+local TRAY_ITEM_SCALE = 0.6
 local CUSTOMER_COLORS = {
 	Color3.fromRGB(255, 170, 165),
 	Color3.fromRGB(165, 200, 255),
@@ -224,6 +225,24 @@ local function updateGuide(player)
 	player:SetAttribute("Target", target)
 end
 
+-- The tray shows the selected hotbar treat, or the first one if none is selected.
+local function trayTreat(player)
+	local bar = hotbars[player]
+	if not bar then
+		return nil
+	end
+	local selected = bar.Selected and bar.Slots[bar.Selected]
+	if selected and selected ~= 0 then
+		return selected
+	end
+	for _, recipeIndex in bar.Slots do
+		if recipeIndex ~= 0 then
+			return recipeIndex
+		end
+	end
+	return nil
+end
+
 local function updateCarriedTray(player, data)
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -236,24 +255,46 @@ local function updateCarriedTray(player, data)
 		end
 		return
 	end
-	if tray and tray.Parent then
+	if not (tray and tray.Parent) then
+		tray = Instance.new("Part")
+		tray.Name = "CarriedTray"
+		tray.Size = Vector3.new(2.6, 0.25, 1.6)
+		tray.Color = Color3.fromRGB(240, 150, 175)
+		tray.CanCollide = false
+		tray.CanQuery = false
+		tray.CanTouch = false
+		tray.Massless = true
+		tray.CFrame = root.CFrame * CFrame.new(0, 0.2, -1.6)
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = root
+		weld.Part1 = tray
+		weld.Parent = tray
+		tray.Parent = character
+		carriedTrays[player] = tray
+	end
+
+	local showing = trayTreat(player)
+	if tray:GetAttribute("Showing") == showing then
 		return
 	end
-	tray = Instance.new("Part")
-	tray.Name = "CarriedTray"
-	tray.Size = Vector3.new(2.6, 0.25, 1.6)
-	tray.Color = Color3.fromRGB(240, 150, 175)
-	tray.CanCollide = false
-	tray.CanQuery = false
-	tray.CanTouch = false
-	tray.Massless = true
-	tray.CFrame = root.CFrame * CFrame.new(0, 0.2, -1.6)
-	local weld = Instance.new("WeldConstraint")
-	weld.Part0 = root
-	weld.Part1 = tray
-	weld.Parent = tray
-	tray.Parent = character
-	carriedTrays[player] = tray
+	tray:SetAttribute("Showing", showing)
+	local old = tray:FindFirstChild("Treat")
+	if old then
+		old:Destroy()
+	end
+	if showing then
+		local treat = ItemBuilder.Build(
+			Config.Recipes[showing],
+			TRAY_ITEM_SCALE,
+			tray.CFrame * CFrame.new(0, tray.Size.Y / 2 + 0.1, 0)
+		)
+		treat.Name = "Treat"
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = tray
+		weld.Part1 = treat.PrimaryPart
+		weld.Parent = treat.PrimaryPart
+		treat.Parent = tray
+	end
 end
 
 -- Each hotbar box holds one kind of treat. A kind keeps its box until it runs out.
