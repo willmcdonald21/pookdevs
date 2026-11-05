@@ -75,6 +75,9 @@ local function clean(saved)
 		Receipts = {},
 		BoostUntil = cleanCount(saved.BoostUntil),
 		StarterPackClaimed = saved.StarterPackClaimed == true,
+		LastSeen = cleanCount(saved.LastSeen),
+		DailyDay = cleanCount(saved.DailyDay),
+		DailyStreak = math.min(cleanCount(saved.DailyStreak), #Config.DailyRewards),
 	}
 	if type(saved.Receipts) == "table" then
 		for _, receiptId in saved.Receipts do
@@ -209,6 +212,7 @@ function PlayerData.Save(player, release)
 			end
 			local value = table.clone(session.data)
 			value.Lock = not release and newLock() or nil
+			value.LastSeen = os.time()
 			saved = true
 			return value, { player.UserId }
 		end)
