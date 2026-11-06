@@ -258,6 +258,48 @@ listLayout.Padding = UDim.new(0, 6)
 listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 listLayout.Parent = rowList
 
+-- Tabs under the title, for menus that have them. The list moves down to make room.
+local TAB_HEIGHT = 40
+local tabBar = Instance.new("Frame")
+tabBar.Name = "Tabs"
+tabBar.Size = UDim2.new(1, -16, 0, TAB_HEIGHT)
+tabBar.Position = UDim2.fromOffset(8, 54)
+tabBar.BackgroundTransparency = 1
+tabBar.Visible = false
+tabBar.ZIndex = 6
+tabBar.Parent = panel
+local tabLayout = Instance.new("UIListLayout")
+tabLayout.FillDirection = Enum.FillDirection.Horizontal
+tabLayout.Padding = UDim.new(0, 8)
+tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+tabLayout.Parent = tabBar
+
+local function showTabs(names, current, onPick)
+	for index, name in names do
+		local tab = button(name .. "Tab", UDim2.fromOffset(110, TAB_HEIGHT), UDim2.new(), TOP_LEFT, name == current and PINK or GREY, tabBar)
+		tab.Text = name
+		tab.LayoutOrder = index
+		tab.ZIndex = 7
+		tab.Activated:Connect(function()
+			onPick(name)
+		end)
+	end
+	tabBar.Visible = true
+	rowList.Position = UDim2.fromOffset(8, 54 + TAB_HEIGHT + 6)
+	rowList.Size = UDim2.new(1, -16, 1, -60 - TAB_HEIGHT - 6)
+end
+
+local function hideTabs()
+	for _, child in tabBar:GetChildren() do
+		if child:IsA("GuiButton") then
+			child:Destroy()
+		end
+	end
+	tabBar.Visible = false
+	rowList.Position = UDim2.fromOffset(8, 54)
+	rowList.Size = UDim2.new(1, -16, 1, -60)
+end
+
 local rowOrder = 0
 -- actions is a list of { Text, Color, OnClick }. OnClick is nil for a plain label.
 local function addRow(title, detail, actions)
@@ -520,8 +562,15 @@ function panels.Bake()
 	end
 end
 
+-- The Floor tab has everything that stands on the floor, and the Wall tab has wall pieces.
+local decorTab = "Floor"
+
 function panels.Decorate()
 	panelTitle.Text = ("Decorate (Charm %d)"):format(state.Charm)
+	showTabs({ "Floor", "Wall" }, decorTab, function(name)
+		decorTab = name
+		setPanel("Decorate")
+	end)
 	addRow("Move things", "Move or turn anything in your bakery, including the oven and counters", {
 		{
 			Text = "Move",
@@ -532,7 +581,7 @@ function panels.Decorate()
 		},
 	})
 	for _, item in Config.Items do
-		if Config.IsAllowed(item, player.UserId) then
+		if Config.IsAllowed(item, player.UserId) and (item.Wall == true) == (decorTab == "Wall") then
 			local owned = state.Owned[item.Id]
 			local stored = owned - placedCount(item.Id)
 			local detail
@@ -706,6 +755,7 @@ local function refreshPanel()
 	end
 	local scroll = rowList.CanvasPosition
 	clearRows()
+	hideTabs()
 	panels[currentPanel]()
 	rowList.CanvasPosition = scroll
 end
