@@ -1703,13 +1703,19 @@ local function say(label, text)
 	label.Visible = true
 end
 
-local function pickStockedCase(plot, data)
-	local keys = {}
+-- A random case holding the wanted treat, or else any stocked case, or nil when all are empty.
+local function pickStockedCase(plot, data, wanted)
+	local stocked, hasWanted = {}, {}
 	for key in plot.cases do
-		if #data.Stock[key] > 0 then
-			table.insert(keys, key)
+		local stock = data.Stock[key]
+		if #stock > 0 then
+			table.insert(stocked, key)
+		end
+		if table.find(stock, wanted) then
+			table.insert(hasWanted, key)
 		end
 	end
+	local keys = #hasWanted > 0 and hasWanted or stocked
 	if #keys == 0 then
 		return nil
 	end
@@ -1781,23 +1787,25 @@ local function edgeNear(point)
 	return edges[math.random(math.min(2, #edges))]
 end
 
--- Inside a bakery: a stocked case, then the counter to pay. Stops early if the owner leaves.
+-- Inside a bakery: a case with the treat they want if there is one, then the counter to
+-- pay. They settle for something else if their treat isn't there, and tip when it is.
+-- Stops early if the owner leaves.
 local function shopAt(plot, session, person)
 	local model, label = person.model, person.label
+	local wanted = person.wants
 	local function gone()
 		return plot.session ~= session
 	end
 
 	local owner = plot.owner
 	local data = PlayerData.Get(owner)
-	local key = data and pickStockedCase(plot, data)
-	local recipe
+	local key = data and pickStockedCase(plot, data, wanted)
+	local recipe, gotWanted
 	if key then
 		walkAround(model, plot.cases[key].stand, person.speed)
 		if gone() then
 			return
 		end
-		say(label, "Hmm, let me see...")
 		task.wait(Config.BrowseTime)
 		if gone() then
 			return
@@ -1805,34 +1813,59 @@ local function shopAt(plot, session, person)
 		-- Another customer may have emptied this case, or the owner may have moved it.
 		local stock = plot.cases[key] and data.Stock[key]
 		if stock and #stock > 0 then
-			local recipeIndex = table.remove(stock, math.random(#stock))
-			recipe = Config.Recipes[recipeIndex]
+			local slot = table.find(stock, wanted)
+			gotWanted = slot ~= nil
+			recipe = Config.Recipes[table.remove(stock, slot or math.random(#stock))]
 			refreshCase(plot, data, key)
 			syncStats(owner)
 		end
 	end
 
+	-- The thought bubble goes once they've chosen, and they say what they think instead.
+	model:SetAttribute("Wants", nil)
 	if recipe then
-		say(label, ("Mmm, %s!"):format(recipe.Name:lower()))
+		if gotWanted then
+			say(label, "Just what I wanted!")
+		else
+			-- Every treat's name takes an "s", like "cupcakes".
+			say(label, ("No %ss... %s it is!"):format(Config.Recipes[wanted].Name:lower(), recipe.Name:lower()))
+		end
 		walkAround(model, payPosition(plot, data), person.speed)
 		if gone() then
 			return
 		end
 		local price = salePrice(data, recipe)
-		local tip = 0
+		local stars = 0
 		if person.golden then
 			price *= Config.GoldenCustomer.PayScale
 			if math.random() < Config.GoldenCustomer.StarChance then
-				tip = 1
+				stars = 1
 			end
 		end
 		local coins = earn(owner, data, price)
-		data.Stars += tip
+		local tipCoins = 0
+		if gotWanted then
+			local share = Config.WantedTip.Min + math.random() * (Config.WantedTip.Max - Config.WantedTip.Min)
+			local tip = math.floor(price * share + 0.5)
+			if tip > 0 then
+				tipCoins = earn(owner, data, tip)
+			end
+		end
+		data.Stars += stars
 		addGoalProgress(data, "Sell", table.find(Config.Recipes, recipe))
 		syncStats(owner)
 		if person.golden then
-			local tipText = tip > 0 and " and tipped a Sugar Star" or ""
+			local tips = {}
+			if tipCoins > 0 then
+				table.insert(tips, ("%d coins"):format(tipCoins))
+			end
+			if stars > 0 then
+				table.insert(tips, "a Sugar Star")
+			end
+			local tipText = #tips > 0 and " and tipped " .. table.concat(tips, " and ") or ""
 			notify(owner, ("+%d coins: a golden customer bought %s%s!"):format(coins, recipe.Name:lower(), tipText), "Coin")
+		elseif tipCoins > 0 then
+			notify(owner, ("+%d coins: %s sold, +%d tip!"):format(coins, recipe.Name, tipCoins), "Coin")
 		else
 			notify(owner, ("+%d coins: %s sold"):format(coins, recipe.Name), "Coin")
 		end
@@ -1845,12 +1878,16 @@ local function shopAt(plot, session, person)
 end
 
 -- Takes a person from wherever they are to a bakery's path, up it and through the door to
--- shop, then back out and down the path to the plaza. If the owner leaves on the way, the
+-- shop, then back out and down the path to the plaza. They come wanting one of the
+-- owner's unlocked treats, shown in a thought bubble. If the owner leaves on the way, the
 -- person heads back to the plaza.
 local function visitBakery(person)
 	local plot, session = person.visit, person.visitSession
 	local model = person.model
 	local door = plot.door.Position + Vector3.new(0, 3, 0)
+	local data = PlayerData.Get(plot.owner)
+	person.wants = math.random(data and data.RecipesUnlocked or 1)
+	model:SetAttribute("Wants", person.wants)
 	walkAround(model, plot.mouth, person.speed, true)
 	if plot.session == session then
 		walkCustomer(model, door, person.speed)
@@ -1866,6 +1903,7 @@ local function visitBakery(person)
 	end
 	person.visit = nil
 	person.label.Visible = false
+	model:SetAttribute("Wants", nil)
 end
 
 -- A person strolls between a few spots, shopping whenever a bakery calls them in, then
@@ -1921,6 +1959,8 @@ local function spawnPerson(position)
 		speed = Config.CustomerSpeed * randomBetween(Config.Townsfolk.Speed),
 		visit = nil,
 		visitSession = nil,
+		-- The Config.Recipes index they want on a bakery visit.
+		wants = nil,
 		leaving = false,
 	}
 	townsfolk[person] = true
@@ -2061,16 +2101,26 @@ local function customerInterval(data)
 	return math.max(Config.CustomerMinInterval, Config.CustomerInterval / speed)
 end
 
+-- Mostly short waits with the odd long lull: a random factor that averages about 1, kept
+-- between CustomerGap.Min and Max.
+local function customerGap()
+	return math.clamp(-math.log(1 - math.random()), Config.CustomerGap.Min, Config.CustomerGap.Max)
+end
+
 local function runCustomerSpawner(plot, session, player)
 	while plot.session == session do
-		if plot.visitors < Config.MaxCustomers then
-			requestCustomer(plot, session)
+		local arriving = math.random() < Config.CustomerGap.PairChance and 2 or 1
+		for _ = 1, arriving do
+			if plot.visitors < Config.MaxCustomers then
+				requestCustomer(plot, session)
+			end
 		end
 		local data = PlayerData.Get(player)
 		if not data then
 			return
 		end
-		task.wait(customerInterval(data))
+		-- Waits stretch a little to make up for pairs, so customers come as often as before.
+		task.wait(customerInterval(data) * customerGap() * (1 + Config.CustomerGap.PairChance))
 	end
 end
 
