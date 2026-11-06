@@ -242,15 +242,43 @@ local function findCaseWithRoom(plot, data)
 	return nil
 end
 
+-- A bought station, like the Luxury Oven, is only in the bakery once its owner has
+-- bought it.
+local function hasStation(data, id)
+	return not Layout.GetStation(id).Bought or (data ~= nil and data[id] == true)
+end
+
+local function ownedOvens(plot, data)
+	local ovens = {}
+	for _, oven in plot.ovens do
+		if hasStation(data, oven.model.Name) then
+			table.insert(ovens, oven)
+		end
+	end
+	return ovens
+end
+
 local function updateGuide(player)
 	local plot = playerPlots[player]
 	local data = PlayerData.Get(player)
 	local hint, target = "", nil
+	local ready, idle, baking
+	if plot and data then
+		for _, oven in ownedOvens(plot, data) do
+			if oven.state == "ready" then
+				ready = ready or oven
+			elseif oven.state == "idle" then
+				idle = idle or oven
+			else
+				baking = baking or oven
+			end
+		end
+	end
 	if not plot or not data then
 		hint = "All bakeries are taken right now. Have a look around!"
-	elseif plot.ovenState == "ready" then
-		hint = ("Your %s batch is ready! Collect it from the oven"):format(plot.bakeRecipe.Name:lower())
-		target = "Oven"
+	elseif ready then
+		hint = ("Your %s batch is ready! Collect it from the %s"):format(ready.recipe.Name:lower(), ready.name:lower())
+		target = ready.model.Name
 	elseif trayTotal(data) > 0 then
 		local _, case = findCaseWithRoom(plot, data)
 		if case then
@@ -260,14 +288,14 @@ local function updateGuide(player)
 			hint = "Your cases are full! Pack a delivery or wait for customers"
 			target = "PackingStation"
 		end
-	elseif plot.ovenState == "baking" then
-		hint = ("Baking %s..."):format(plot.bakeRecipe.Name:lower())
+	elseif not idle then
+		hint = ("Baking %s..."):format(baking.recipe.Name:lower())
 	elseif not canBakeAnything(data) then
 		hint = "Out of ingredients! Unpack your delivery crate or visit the grocery store"
 		target = "IngredientCrate"
 	else
-		hint = "Choose a treat to bake at the oven"
-		target = "Oven"
+		hint = ("Choose a treat to bake at the %s"):format(idle.name:lower())
+		target = idle.model.Name
 	end
 	player:SetAttribute("Hint", hint)
 	player:SetAttribute("Target", target)
@@ -562,87 +590,107 @@ selectSlotEvent.OnServerEvent:Connect(function(player, slot)
 	syncStats(player)
 end)
 
--- Oven
-local function setOvenWindow(plot, color, material)
-	plot.window.Color = color
-	plot.window.Material = material
+-- Ovens. Every bakery has the regular oven, and the Luxury Oven once it's bought. Each
+-- one bakes one batch at a time, and the Luxury Oven bakes faster.
+local function makeOven(model)
+	local body = model.Body
+	return {
+		model = model,
+		name = Layout.GetStation(model.Name).Name,
+		timeScale = model.Name == "LuxuryOven" and Config.LuxuryOven.BakeTimeScale or 1,
+		state = "idle",
+		recipe = nil,
+		count = 0,
+		finishNow = false,
+		changedAt = 0,
+		window = model.Window,
+		burners = model.Burners:GetChildren(),
+		smoke = model.Chimney.Smoke,
+		prompt = body.Prompt,
+		status = body.Status.Label,
+	}
 end
 
-local function setBurners(plot, on)
-	for _, burner in plot.burners do
+local function setOvenWindow(oven, color, material)
+	oven.window.Color = color
+	oven.window.Material = material
+end
+
+local function setBurners(oven, on)
+	for _, burner in oven.burners do
 		burner.Color = on and Color3.fromRGB(255, 90, 40) or Color3.fromRGB(85, 80, 85)
 		burner.Material = on and Enum.Material.Neon or Enum.Material.SmoothPlastic
 	end
 end
 
-local function resetOven(plot)
-	plot.ovenState = "idle"
-	plot.bakeRecipe = nil
-	plot.ovenCount = 0
-	plot.finishNow = false
-	plot.ovenChangedAt = os.clock()
-	plot.ovenPrompt.ActionText = "Bake"
-	plot.ovenPrompt.HoldDuration = 0
-	plot.ovenStatus.Text = ""
-	plot.smoke.Enabled = false
-	setOvenWindow(plot, Color3.fromRGB(70, 50, 60), Enum.Material.Glass)
-	setBurners(plot, false)
+local function resetOven(oven)
+	oven.state = "idle"
+	oven.recipe = nil
+	oven.count = 0
+	oven.finishNow = false
+	oven.changedAt = os.clock()
+	oven.prompt.ActionText = "Bake"
+	oven.prompt.HoldDuration = 0
+	oven.status.Text = ""
+	oven.smoke.Enabled = false
+	setOvenWindow(oven, Color3.fromRGB(70, 50, 60), Enum.Material.Glass)
+	setBurners(oven, false)
 end
 
 -- Callers check missingIngredients first. The batch's ingredients are used up here.
-local function startBake(plot, player, recipe)
+local function startBake(plot, oven, player, recipe)
 	local data = PlayerData.Get(player)
 	local session = plot.session
 	for id, count in recipe.Ingredients do
 		data.Pantry[id] -= count
 	end
-	plot.ovenState = "baking"
-	plot.bakeRecipe = recipe
-	plot.ovenCount = upgradeLevel(data, "Batch").BatchSize
-	plot.finishNow = false
-	plot.ovenPrompt.ActionText = ("Finish Now (%d Star)"):format(Config.FinishBakeStars)
-	plot.ovenPrompt.HoldDuration = 0.5
-	plot.smoke.Enabled = true
-	setOvenWindow(plot, Color3.fromRGB(255, 150, 60), Enum.Material.Neon)
-	setBurners(plot, true)
+	oven.state = "baking"
+	oven.recipe = recipe
+	oven.count = upgradeLevel(data, "Batch").BatchSize
+	oven.finishNow = false
+	oven.prompt.ActionText = ("Finish Now (%d Star)"):format(Config.FinishBakeStars)
+	oven.prompt.HoldDuration = 0.5
+	oven.smoke.Enabled = true
+	setOvenWindow(oven, Color3.fromRGB(255, 150, 60), Enum.Material.Neon)
+	setBurners(oven, true)
 	data.LastRecipe = table.find(Config.Recipes, recipe)
 	addGoalProgress(data, "Bake")
 	syncStats(player)
 
 	task.spawn(function()
-		local finishAt = os.clock() + bakeTime(data, recipe)
-		while os.clock() < finishAt and not plot.finishNow do
+		local finishAt = os.clock() + bakeTime(data, recipe) * oven.timeScale
+		while os.clock() < finishAt and not oven.finishNow do
 			if plot.session ~= session then
 				return
 			end
-			plot.ovenStatus.Text = ("Baking... %ds"):format(math.ceil(finishAt - os.clock()))
+			oven.status.Text = ("Baking... %ds"):format(math.ceil(finishAt - os.clock()))
 			task.wait(0.1)
 		end
 		if plot.session ~= session then
 			return
 		end
-		plot.ovenState = "ready"
-		plot.ovenChangedAt = os.clock()
-		plot.ovenPrompt.ActionText = ("Collect %d %s"):format(plot.ovenCount, recipe.Name)
-		plot.ovenPrompt.HoldDuration = 0
-		plot.ovenStatus.Text = "Ready!"
-		plot.smoke.Enabled = false
-		setOvenWindow(plot, Color3.fromRGB(255, 225, 130), Enum.Material.Neon)
-		setBurners(plot, false)
+		oven.state = "ready"
+		oven.changedAt = os.clock()
+		oven.prompt.ActionText = ("Collect %d %s"):format(oven.count, recipe.Name)
+		oven.prompt.HoldDuration = 0
+		oven.status.Text = "Ready!"
+		oven.smoke.Enabled = false
+		setOvenWindow(oven, Color3.fromRGB(255, 225, 130), Enum.Material.Neon)
+		setBurners(oven, false)
 		notify(player, nil, "Ding")
 		updateGuide(player)
 	end)
 end
 
-local function onOvenPrompt(plot, player)
-	if not canUse(player, plot, plot.ovenPrompt) then
+local function onOvenPrompt(plot, oven, player)
+	if not canUse(player, plot, oven.prompt) then
 		return
 	end
 	local data = PlayerData.Get(player)
-	if plot.ovenState == "idle" then
+	if oven.state == "idle" then
 		openPanelEvent:FireClient(player, "Bake")
-	elseif plot.ovenState == "baking" then
-		if plot.finishNow then
+	elseif oven.state == "baking" then
+		if oven.finishNow then
 			return
 		end
 		if data.Stars < Config.FinishBakeStars then
@@ -650,7 +698,7 @@ local function onOvenPrompt(plot, player)
 			return
 		end
 		data.Stars -= Config.FinishBakeStars
-		plot.finishNow = true
+		oven.finishNow = true
 		syncStats(player)
 	else
 		local space = trayCapacity(data) - trayTotal(data)
@@ -658,18 +706,35 @@ local function onOvenPrompt(plot, player)
 			notify(player, "Your tray is full! Stock a case or pack a delivery first")
 			return
 		end
-		local taken = math.min(space, plot.ovenCount)
-		local index = table.find(Config.Recipes, plot.bakeRecipe)
+		local taken = math.min(space, oven.count)
+		local index = table.find(Config.Recipes, oven.recipe)
 		data.Tray[index] += taken
-		plot.ovenCount -= taken
-		if plot.ovenCount > 0 then
-			plot.ovenPrompt.ActionText = ("Collect %d %s"):format(plot.ovenCount, plot.bakeRecipe.Name)
-			notify(player, "Your tray is full! The rest is still in the oven")
+		oven.count -= taken
+		if oven.count > 0 then
+			oven.prompt.ActionText = ("Collect %d %s"):format(oven.count, oven.recipe.Name)
+			notify(player, ("Your tray is full! The rest is still in the %s"):format(oven.name:lower()))
 		else
-			resetOven(plot)
+			resetOven(oven)
 		end
 		syncStats(player)
 	end
+end
+
+-- The Bake menu bakes in the nearest empty oven the player is standing by.
+local function nearestIdleOven(plot, data, player)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return nil
+	end
+	local nearest, nearestDistance = nil, PANEL_REACH
+	for _, oven in ownedOvens(plot, data) do
+		local distance = (root.Position - oven.prompt.Parent.Position).Magnitude
+		if oven.state == "idle" and distance <= nearestDistance then
+			nearest, nearestDistance = oven, distance
+		end
+	end
+	return nearest
 end
 
 bakeEvent.OnServerEvent:Connect(function(player, index)
@@ -679,11 +744,12 @@ bakeEvent.OnServerEvent:Connect(function(player, index)
 		return
 	end
 	local recipe = Config.Recipes[index]
-	if not recipe or index > data.RecipesUnlocked or plot.ovenState ~= "idle" then
+	if not recipe or index > data.RecipesUnlocked then
 		return
 	end
-	if not isNear(player, plot.ovenPrompt.Parent.Position, PANEL_REACH) then
-		notify(player, "Go to your oven to bake")
+	local oven = nearestIdleOven(plot, data, player)
+	if not oven then
+		notify(player, "Go to an empty oven to bake")
 		return
 	end
 	local missing = missingIngredients(data, recipe)
@@ -691,7 +757,7 @@ bakeEvent.OnServerEvent:Connect(function(player, index)
 		notify(player, "You need " .. missing .. " more")
 		return
 	end
-	startBake(plot, player, recipe)
+	startBake(plot, oven, player, recipe)
 end)
 
 -- Display cases
@@ -1599,15 +1665,15 @@ refreshHelpers = function(plot, data)
 	end
 end
 
--- Moves a finished batch straight from the oven into cases with room.
-local function stockFromOven(plot, data)
-	local recipeIndex = table.find(Config.Recipes, plot.bakeRecipe)
+-- Moves a finished batch straight from an oven into cases with room.
+local function stockFromOven(plot, oven, data)
+	local recipeIndex = table.find(Config.Recipes, oven.recipe)
 	local changed = {}
 	for key, case in plot.cases do
 		local stock = data.Stock[key]
-		while plot.ovenCount > 0 and #stock < #case.slots do
+		while oven.count > 0 and #stock < #case.slots do
 			table.insert(stock, recipeIndex)
-			plot.ovenCount -= 1
+			oven.count -= 1
 			changed[key] = true
 		end
 	end
@@ -1617,6 +1683,7 @@ local function stockFromOven(plot, data)
 	return next(changed) ~= nil
 end
 
+-- The Stocker empties every ready oven and the Baker refills every empty one.
 local function runHelpers(plot, session, player)
 	while plot.session == session do
 		task.wait(0.5)
@@ -1624,22 +1691,24 @@ local function runHelpers(plot, session, player)
 		if plot.session ~= session or not data then
 			return
 		end
-		local waited = os.clock() - plot.ovenChangedAt
 		local stocker = upgradeLevel(data, "Stocker")
 		local baker = upgradeLevel(data, "Baker")
-		if plot.ovenState == "ready" and stocker.Delay and waited >= stocker.Delay then
-			if stockFromOven(plot, data) then
-				if plot.ovenCount == 0 then
-					resetOven(plot)
-				else
-					plot.ovenPrompt.ActionText = ("Collect %d %s"):format(plot.ovenCount, plot.bakeRecipe.Name)
+		for _, oven in ownedOvens(plot, data) do
+			local waited = os.clock() - oven.changedAt
+			if oven.state == "ready" and stocker.Delay and waited >= stocker.Delay then
+				if stockFromOven(plot, oven, data) then
+					if oven.count == 0 then
+						resetOven(oven)
+					else
+						oven.prompt.ActionText = ("Collect %d %s"):format(oven.count, oven.recipe.Name)
+					end
+					syncStats(player)
 				end
-				syncStats(player)
-			end
-		elseif plot.ovenState == "idle" and baker.Delay and waited >= baker.Delay then
-			local recipe = Config.Recipes[data.LastRecipe]
-			if recipe and not missingIngredients(data, recipe) then
-				startBake(plot, player, recipe)
+			elseif oven.state == "idle" and baker.Delay and waited >= baker.Delay then
+				local recipe = Config.Recipes[data.LastRecipe]
+				if recipe and not missingIngredients(data, recipe) then
+					startBake(plot, oven, player, recipe)
+				end
 			end
 		end
 	end
@@ -1663,8 +1732,10 @@ local function claimPlot(player)
 			plot.model:SetAttribute("OwnerId", player.UserId)
 			plot.signLabel.Text = player.DisplayName .. "'s Bakery"
 			playerPlots[player] = plot
-			resetOven(plot)
-			setActive(plot.ovenPrompt, true)
+			for _, oven in plot.ovens do
+				resetOven(oven)
+				setActive(oven.prompt, true)
+			end
 			setActive(plot.cookbookPrompt, true)
 			setActive(plot.pantryPrompt, true)
 			setActive(plot.packingPrompt, true)
@@ -1696,8 +1767,10 @@ local function releasePlot(player)
 	plot.session += 1
 	plot.model:SetAttribute("OwnerId", nil)
 	plot.signLabel.Text = "Empty Bakery"
-	resetOven(plot)
-	setActive(plot.ovenPrompt, false)
+	for _, oven in plot.ovens do
+		resetOven(oven)
+		setActive(oven.prompt, false)
+	end
 	setActive(plot.cookbookPrompt, false)
 	setActive(plot.pantryPrompt, false)
 	setActive(plot.packingPrompt, false)
@@ -1935,7 +2008,6 @@ local function onPlayerAdded(player)
 end
 
 for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
-	local body = model.Oven.Body
 	local floor = model.Floor
 	local helpersFolder = Instance.new("Folder")
 	helpersFolder.Name = "Helpers"
@@ -1945,19 +2017,10 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		owner = nil,
 		ownerId = nil,
 		session = 0,
-		ovenState = "idle",
-		bakeRecipe = nil,
-		ovenCount = 0,
-		finishNow = false,
-		ovenChangedAt = 0,
+		ovens = { makeOven(model.Oven), makeOven(model.LuxuryOven) },
 		cases = {},
 		orders = {},
 		orderTokens = {},
-		window = model.Oven.Window,
-		burners = model.Oven.Burners:GetChildren(),
-		smoke = model.Oven.Chimney.Smoke,
-		ovenPrompt = body.Prompt,
-		ovenStatus = body.Status.Label,
 		cookbookPrompt = model.UpgradeStation.Prompt,
 		pantryPrompt = model.PantryShelf.Back.Prompt,
 		pantrySlots = model.PantryShelf.Slots,
@@ -1986,13 +2049,15 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		setUpStation(plot, station)
 	end
 	placeStations(plot, nil)
-	setActive(plot.ovenPrompt, false)
+	for _, oven in plot.ovens do
+		setActive(oven.prompt, false)
+		oven.prompt.Triggered:Connect(function(player)
+			onOvenPrompt(plot, oven, player)
+		end)
+	end
 	setActive(plot.cookbookPrompt, false)
 	setActive(plot.pantryPrompt, false)
 	setActive(plot.packingPrompt, false)
-	plot.ovenPrompt.Triggered:Connect(function(player)
-		onOvenPrompt(plot, player)
-	end)
 	plot.cookbookPrompt.Triggered:Connect(function(player)
 		if canUse(player, plot, plot.cookbookPrompt) then
 			openPanelEvent:FireClient(player, "Cookbook")
