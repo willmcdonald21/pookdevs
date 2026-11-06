@@ -299,6 +299,7 @@ end
 -- game pass, and everyone can see it in the Decorate menu.
 -- An item with Wall = true hangs on a wall and shows in the Decorate menu's Wall tab.
 -- Its origin is on the wall at the item's bottom, and its parts stick out toward -Z.
+-- On a display case, parts with Paint = true take the colour the owner paints it.
 local CASE_PINK = rgb(240, 150, 175)
 local GLASS = rgb(210, 235, 245)
 
@@ -322,9 +323,9 @@ Config.Items = {
 		Charm = 0,
 		Slots = slots({ 3.3 }),
 		Parts = {
-			{ Kind = "Box", Size = Vector3.new(4.6, 3, 2.8), Y = 1.5, Color = CASE_PINK },
+			{ Kind = "Box", Size = Vector3.new(4.6, 3, 2.8), Y = 1.5, Color = CASE_PINK, Paint = true },
 			{ Kind = "Box", Size = Vector3.new(4.6, 2, 2.8), Y = 4, Color = GLASS, Material = Enum.Material.Glass, Transparency = 0.7 },
-			{ Kind = "Box", Size = Vector3.new(4.8, 0.25, 3), Y = 5.1, Color = CASE_PINK, Transparency = 0.5 },
+			{ Kind = "Box", Size = Vector3.new(4.8, 0.25, 3), Y = 5.1, Color = CASE_PINK, Paint = true, Transparency = 0.5 },
 		},
 	},
 	{
@@ -334,10 +335,10 @@ Config.Items = {
 		Charm = 1,
 		Slots = slots({ 1.9, 4.1 }),
 		Parts = {
-			{ Kind = "Box", Size = Vector3.new(4.6, 1.6, 2.8), Y = 0.8, Color = CASE_PINK },
-			{ Kind = "Box", Size = Vector3.new(4.6, 0.2, 2.8), Y = 3.9, Color = CASE_PINK, Transparency = 0.5 },
+			{ Kind = "Box", Size = Vector3.new(4.6, 1.6, 2.8), Y = 0.8, Color = CASE_PINK, Paint = true },
+			{ Kind = "Box", Size = Vector3.new(4.6, 0.2, 2.8), Y = 3.9, Color = CASE_PINK, Paint = true, Transparency = 0.5 },
 			{ Kind = "Box", Size = Vector3.new(4.6, 4.8, 2.8), Y = 4, Color = GLASS, Material = Enum.Material.Glass, Transparency = 0.75 },
-			{ Kind = "Box", Size = Vector3.new(4.8, 0.25, 3), Y = 6.5, Color = CASE_PINK, Transparency = 0.5 },
+			{ Kind = "Box", Size = Vector3.new(4.8, 0.25, 3), Y = 6.5, Color = CASE_PINK, Paint = true, Transparency = 0.5 },
 		},
 	},
 	{
@@ -788,14 +789,84 @@ Config.HotbarSize = 5
 -- entry). The last case can't be stored, so customers always have something to visit.
 Config.StarterCase = { Key = "starter", Item = "SmallCase", X = 36, Z = 27, R = 0 }
 
--- A second, gold oven sold in the Shop as a luxury. Its bake times are multiplied by
--- BakeTimeScale, so 0.85 bakes 15% faster than the normal oven.
+-- A second, gold oven sold in the Decorate menu's Expansion tab as a luxury. Its bake
+-- times are multiplied by BakeTimeScale, so 0.85 bakes 15% faster than the normal oven.
 Config.LuxuryOven = {
 	Name = "Luxury Oven",
 	Coins = 25000,
 	BakeTimeScale = 0.85,
 	Detail = "A gold second oven that bakes 15% faster. Bake two batches at once!",
 }
+
+-- Bigger bakeries, bought in order from the Decorate menu's Expansion tab. Each step moves
+-- the back wall Back studs further back and each side wall Side studs further out. The
+-- front, with the door and sign, stays put.
+Config.Expansions = {
+	{ Coins = 3000, Back = 8, Side = 2 },
+	{ Coins = 8000, Back = 8, Side = 2 },
+	{ Coins = 18000, Back = 8, Side = 2 },
+}
+
+-- Paint for the walls, the oven and each display case, bought in the Decorate menu's
+-- Paint tab. Anything can use any colour, except that the oven can't use colours with
+-- Oven = false. The oven gets no yellow or shiny paint, so only the Luxury Oven ever looks
+-- gold, and the Luxury Oven can't be painted.
+Config.WallPaintCoins = 25
+Config.OvenPaintCoins = 75
+Config.CasePaintCoins = 15
+-- Display cases start in this colour.
+Config.CaseOriginalPaint = "Bubblegum"
+Config.Paints = {
+	{ Id = "Vanilla", Name = "Vanilla", Color = rgb(255, 240, 225) },
+	{ Id = "Snow", Name = "Snow", Color = rgb(250, 250, 252) },
+	{ Id = "Strawberry", Name = "Strawberry", Color = rgb(255, 190, 205) },
+	{ Id = "Bubblegum", Name = "Bubblegum", Color = rgb(240, 150, 175) },
+	{ Id = "Peach", Name = "Peach", Color = rgb(255, 210, 180) },
+	{ Id = "Lemon", Name = "Lemon", Color = rgb(255, 240, 170), Oven = false },
+	{ Id = "Mint", Name = "Mint", Color = rgb(175, 225, 205) },
+	{ Id = "Sky", Name = "Sky", Color = rgb(185, 220, 245) },
+	{ Id = "Lavender", Name = "Lavender", Color = rgb(215, 200, 240) },
+	{ Id = "Cocoa", Name = "Cocoa", Color = rgb(150, 105, 85) },
+	{ Id = "Cherry", Name = "Cherry", Color = rgb(215, 70, 90) },
+}
+-- What can be painted. Walls lists part names in the plot's Walls folder, and Oven lists
+-- part names in its Oven model. Original is the paint it starts with.
+Config.PaintTargets = {
+	{ Id = "Back", Name = "Back Wall", Walls = { "BackWall" }, Original = "Vanilla", Coins = Config.WallPaintCoins },
+	{ Id = "Left", Name = "Left Wall", Walls = { "LeftWall" }, Original = "Vanilla", Coins = Config.WallPaintCoins },
+	{ Id = "Right", Name = "Right Wall", Walls = { "RightWall" }, Original = "Vanilla", Coins = Config.WallPaintCoins },
+	{
+		Id = "Front",
+		Name = "Front Wall",
+		Walls = { "FrontLeft", "FrontRight" },
+		Original = "Vanilla",
+		Coins = Config.WallPaintCoins,
+	},
+	{ Id = "Oven", Name = "Oven", Oven = { "Body", "Backsplash", "Hood" }, Original = "Mint", Coins = Config.OvenPaintCoins },
+}
+
+function Config.GetPaint(id)
+	for _, paint in Config.Paints do
+		if paint.Id == id then
+			return paint
+		end
+	end
+	return nil
+end
+
+function Config.GetPaintTarget(id)
+	for _, target in Config.PaintTargets do
+		if target.Id == id then
+			return target
+		end
+	end
+	return nil
+end
+
+-- True when the target can be painted this colour. Display cases use every colour.
+function Config.CanPaint(target, paint)
+	return not target.Oven or paint.Oven ~= false
+end
 
 -- Delivery board: one order per tier at a time. Pay is the treats' sale price times PayScale.
 Config.DeliveryTiers = {
