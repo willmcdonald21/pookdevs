@@ -1034,8 +1034,11 @@ local function queueOrder(plot, player, slot)
 	end)
 end
 
+-- The box slides to the end of the belt and disappears, wherever the table has been moved.
 local function animateBox(plot)
-	local start = plot.packingTable.CFrame * CFrame.new(0, 2.2, 0)
+	local table_, belt = plot.packingTable, plot.packingBelt
+	local start = table_.CFrame * CFrame.new(0, table_.Size.Y / 2 + 1, 0)
+	local finish = belt.CFrame * CFrame.new(0, belt.Size.Y / 2 + 1, -belt.Size.Z / 2 + 1.2)
 	local box = Instance.new("Part")
 	box.Name = "DeliveryBox"
 	box.Anchored = true
@@ -1047,13 +1050,15 @@ local function animateBox(plot)
 	box.Material = Enum.Material.Cardboard
 	box.CFrame = start
 	box.Parent = plot.model
-	local tween = TweenService:Create(box, TweenInfo.new(1.4, Enum.EasingStyle.Linear), {
-		CFrame = CFrame.new(plot.hatch.Position) * start.Rotation,
-	})
-	tween:Play()
-	tween.Completed:Connect(function()
+	local slide = TweenService:Create(box, TweenInfo.new(1.2, Enum.EasingStyle.Linear), { CFrame = finish })
+	local vanish = TweenService:Create(box, TweenInfo.new(0.4), { Size = Vector3.one * 0.2, Transparency = 1 })
+	slide.Completed:Connect(function()
+		vanish:Play()
+	end)
+	vanish.Completed:Connect(function()
 		box:Destroy()
 	end)
+	slide:Play()
 end
 
 shipEvent.OnServerEvent:Connect(function(player, slot)
