@@ -38,6 +38,9 @@ Layout.Stations = {
 	{ Id = "Pantry", Name = "Pantry Shelf", Path = "PantryShelf", Facing = Vector3.xAxis },
 	{ Id = "Checkout", Name = "Checkout Counter", Path = "Checkout", Facing = Vector3.zAxis, NeedsFront = true },
 	{ Id = "Packing", Name = "Delivery Counter", Path = "PackingStation", Facing = Vector3.zAxis },
+	-- Bought stations are only in a bakery once the owner has bought them. The save
+	-- field with the station's Id is true when they have.
+	{ Id = "LuxuryOven", Name = "Luxury Oven", Path = "LuxuryOven", Facing = Vector3.zAxis, Bought = true },
 }
 
 function Layout.GetStation(id)
