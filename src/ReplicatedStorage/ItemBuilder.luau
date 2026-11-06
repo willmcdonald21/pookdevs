@@ -2,7 +2,9 @@
 local ItemBuilder = {}
 
 -- Parts are welded to the first part. Callers anchor or weld that part.
--- Parts are only solid when solid is true.
+-- Parts are only solid when solid is true. A Disc lies flat like a plate on a table, and
+-- a Plate faces the front like a clock on a wall. A part with Light = range glows in its
+-- own colour.
 function ItemBuilder.Build(definition, scale, cframe, solid)
 	local model = Instance.new("Model")
 	model.Name = definition.Name
@@ -14,6 +16,10 @@ function ItemBuilder.Build(definition, scale, cframe, solid)
 			part.Shape = Enum.PartType.Cylinder
 			part.Size = Vector3.new(spec.Height, spec.Diameter, spec.Diameter) * scale
 			part.CFrame = cframe * offset * CFrame.Angles(0, 0, math.rad(90))
+		elseif spec.Kind == "Plate" then
+			part.Shape = Enum.PartType.Cylinder
+			part.Size = Vector3.new(spec.Height, spec.Diameter, spec.Diameter) * scale
+			part.CFrame = cframe * offset * CFrame.Angles(0, math.rad(90), 0)
 		elseif spec.Kind == "Ball" then
 			part.Shape = Enum.PartType.Ball
 			part.Size = Vector3.one * spec.Diameter * scale
@@ -29,6 +35,13 @@ function ItemBuilder.Build(definition, scale, cframe, solid)
 		part.CanQuery = false
 		part.CanTouch = false
 		part.Massless = true
+		if spec.Light then
+			local light = Instance.new("PointLight")
+			light.Color = spec.Color
+			light.Range = spec.Light * scale
+			light.Brightness = 1.5
+			light.Parent = part
+		end
 		if first then
 			local weld = Instance.new("WeldConstraint")
 			weld.Part0 = first
