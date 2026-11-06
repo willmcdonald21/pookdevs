@@ -106,7 +106,7 @@ Config.Crate = { Interval = 90, Size = 12 }
 Config.Recipes = {
 	{
 		Name = "Cookie",
-		Price = 5,
+		Price = 4,
 		BakeScale = 1,
 		UnlockCost = 0,
 		Ingredients = { Flour = 1, Sugar = 1, Butter = 1 },
@@ -118,7 +118,7 @@ Config.Recipes = {
 	},
 	{
 		Name = "Cupcake",
-		Price = 12,
+		Price = 8,
 		BakeScale = 1.3,
 		UnlockCost = 100,
 		Ingredients = { Flour = 1, Sugar = 1, Eggs = 1, Milk = 1 },
@@ -130,7 +130,7 @@ Config.Recipes = {
 	},
 	{
 		Name = "Donut",
-		Price = 25,
+		Price = 18,
 		BakeScale = 1.6,
 		UnlockCost = 500,
 		Ingredients = { Flour = 2, Sugar = 1, Eggs = 1, Milk = 1 },
@@ -142,7 +142,7 @@ Config.Recipes = {
 	},
 	{
 		Name = "Pie",
-		Price = 50,
+		Price = 35,
 		BakeScale = 2,
 		UnlockCost = 2500,
 		Ingredients = { Flour = 2, Butter = 1, Berries = 2 },
@@ -153,7 +153,7 @@ Config.Recipes = {
 	},
 	{
 		Name = "Birthday Cake",
-		Price = 100,
+		Price = 70,
 		BakeScale = 2.5,
 		UnlockCost = 10000,
 		Ingredients = { Flour = 2, Sugar = 2, Eggs = 2, Butter = 1, Milk = 1 },
