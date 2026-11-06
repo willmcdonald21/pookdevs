@@ -1036,11 +1036,11 @@ local function queueOrder(plot, player, slot)
 	end)
 end
 
--- The box slides to the end of the belt and disappears, wherever the table has been moved.
+-- A parcel appears on the counter beside the laptop, lifts up and shrinks away. It works
+-- wherever the counter has been moved.
 local function animateBox(plot)
-	local table_, belt = plot.packingTable, plot.packingBelt
-	local start = table_.CFrame * CFrame.new(0, table_.Size.Y / 2 + 1, 0)
-	local finish = belt.CFrame * CFrame.new(0, belt.Size.Y / 2 + 1, -belt.Size.Z / 2 + 1.2)
+	local top = plot.packingTop
+	local start = top.CFrame * CFrame.new(-2.2, top.Size.Y / 2 + 1, 0)
 	local box = Instance.new("Part")
 	box.Name = "DeliveryBox"
 	box.Anchored = true
@@ -1052,15 +1052,21 @@ local function animateBox(plot)
 	box.Material = Enum.Material.Cardboard
 	box.CFrame = start
 	box.Parent = plot.model
-	local slide = TweenService:Create(box, TweenInfo.new(1.2, Enum.EasingStyle.Linear), { CFrame = finish })
-	local vanish = TweenService:Create(box, TweenInfo.new(0.4), { Size = Vector3.one * 0.2, Transparency = 1 })
-	slide.Completed:Connect(function()
+	local lift = TweenService:Create(box, TweenInfo.new(0.5, Enum.EasingStyle.Quad), {
+		CFrame = start * CFrame.new(0, 1.2, 0),
+	})
+	local vanish = TweenService:Create(box, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		CFrame = start * CFrame.new(0, 2.5, 0),
+		Size = Vector3.one * 0.2,
+		Transparency = 1,
+	})
+	lift.Completed:Connect(function()
 		vanish:Play()
 	end)
 	vanish.Completed:Connect(function()
 		box:Destroy()
 	end)
-	slide:Play()
+	lift:Play()
 end
 
 shipEvent.OnServerEvent:Connect(function(player, slot)
@@ -1950,7 +1956,7 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		pantryPrompt = model.PantryShelf.Back.Prompt,
 		pantrySlots = model.PantryShelf.Slots,
 		packingTable = model.PackingStation.PackingTable,
-		packingBelt = model.PackingStation.PackingBelt,
+		packingTop = model.PackingStation.Top,
 		packingPrompt = model.PackingStation.PackingTable.Prompt,
 		signLabel = model.Sign.SignGui.Label,
 		placedFolder = model.Placed,
