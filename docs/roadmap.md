@@ -8,7 +8,8 @@
 | Redesign | Tray and display cases, customers shop on their own, decorations, Sugar Stars, deliveries, Robux store, hotbar | Built |
 | Engagement batch | Game passes (2x Coins, VIP, Starter, Cozy and Winter packs), 2x Boost, daily reward, offline sales, golden customers, daily goals, Baker and Stocker helpers. See `engagement-plan.md` | Built 2026-11-05 |
 | Town and ingredients | Town square layout, grocery store, ingredients with a pantry shelf and free delivery crate, cookbook counter, new oven, treat shown on the carried tray. See `town-and-ingredients-plan.md` | Built 2026-11-05 |
-| Free placement | Decorating on a 1-stud grid with the normal camera, a Rotate button, and every piece movable, including the oven, pantry, cookbook counter, checkout counter and packing table. Customers walk around furniture. See `free-placement-plan.md` | Built 2026-11-05 |
+| Free placement | Decorating on a 1-stud grid with the normal camera, a Rotate button, and every piece movable, including the oven, pantry, cookbook counter, checkout counter and delivery counter. Customers walk around furniture. See `free-placement-plan.md` | Built 2026-11-05 |
+| Decorating fixes | Click a piece itself to pick it up, so tall pieces by walls work; Rotate always on screen; click or drag the floor to move a held piece; Move things at the top of the menu; delivery station rebuilt as a counter with a laptop, with nothing left on the wall | Built 2026-11-05 |
 | 4. Her version | Exclusive items (system built, none assigned yet), publish with limited access, first playtest | In progress |
 | 5. Public launch | Game passes and products, maturity questionnaire, icon, thumbnails, description, publish to 16+ | Not started |
 | 6. Grow | Creator Dashboard analytics, regular updates, seasonal events | Not started |
