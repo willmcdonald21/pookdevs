@@ -1025,7 +1025,8 @@ local function refreshHeld()
 	local color = ok and OK_COLOR or BLOCKED_COLOR
 	ghostHighlight.FillColor = color
 	ghostHighlight.OutlineColor = color
-	placeBanner.Text = ok and ((held.key and "Moving " or "Placing ") .. held.name) or reason
+	placeBanner.Text = ok and ("%s %s: tap or click the floor to move it"):format(held.key and "Moving" or "Placing", held.name)
+		or reason
 	placeBanner.BackgroundColor3 = ok and GREEN or BLOCKED_COLOR
 	placeButton.BackgroundColor3 = ok and GREEN or GREY
 end
@@ -1280,31 +1281,31 @@ local function pointerOverGui(position)
 	return false
 end
 
--- With a mouse, the preview follows the pointer. Without a held piece, the piece under
--- the pointer is outlined.
+-- With a mouse and nothing held, the piece under the pointer is outlined.
 RunService.RenderStepped:Connect(function()
 	local plot = myPlot()
-	if not decorating or not plot or not UserInputService.MouseEnabled then
+	if not decorating or held or not plot or not UserInputService.MouseEnabled then
 		return
 	end
 	local mouse = UserInputService:GetMouseLocation()
 	if pointerOverGui(mouse - GuiService:GetGuiInset()) then
 		return
 	end
-	local ray = Workspace.CurrentCamera:ViewportPointToRay(mouse.X, mouse.Y)
-	if held then
-		local point = floorPointAt(plot, ray)
-		if point then
-			moveHeldTo(point)
-		end
-	else
-		local thing = pieceOnRay(plot, ray)
-		hoverHighlight.Adornee = thing and pieceInstance(plot, thing.Key)
-		if os.clock() >= bannerHintUntil then
-			placeBanner.Text = thing and ("Click to move the " .. thing.Name:lower()) or MOVE_HINT
-		end
+	local thing = pieceOnRay(plot, Workspace.CurrentCamera:ViewportPointToRay(mouse.X, mouse.Y))
+	hoverHighlight.Adornee = thing and pieceInstance(plot, thing.Key)
+	if os.clock() >= bannerHintUntil then
+		placeBanner.Text = thing and ("Click to move the " .. thing.Name:lower()) or MOVE_HINT
 	end
 end)
+
+local function screenFloorPoint(plot, position)
+	return floorPointAt(plot, Workspace.CurrentCamera:ScreenPointToRay(position.X, position.Y))
+end
+
+-- With a mouse, clicking a piece picks it up, and clicking or dragging on the floor moves
+-- the held piece. It stays put when the pointer goes to the Rotate or Place button.
+-- While dragging, the piece keeps its offset from the pointer so it doesn't jump.
+local dragOffset = nil
 
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed or not decorating then
@@ -1314,15 +1315,36 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	if input.KeyCode == Enum.KeyCode.R then
 		rotateHeld()
 	elseif input.UserInputType == Enum.UserInputType.MouseButton1 and plot then
+		local point = screenFloorPoint(plot, input.Position)
 		if held then
-			tryPlace()
+			if point then
+				moveHeldTo(point)
+				dragOffset = Vector3.zero
+			end
 		else
 			local ray = Workspace.CurrentCamera:ScreenPointToRay(input.Position.X, input.Position.Y)
 			local thing = pieceOnRay(plot, ray)
 			if thing then
 				pickUp(thing)
+				dragOffset = point and Layout.Center(thing.Rect) - Vector3.new(point.X, 0, point.Z)
 			end
 		end
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	local plot = myPlot()
+	if dragOffset and held and plot and input.UserInputType == Enum.UserInputType.MouseMovement then
+		local point = screenFloorPoint(plot, input.Position)
+		if point then
+			moveHeldTo(point + dragOffset)
+		end
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragOffset = nil
 	end
 end)
 
