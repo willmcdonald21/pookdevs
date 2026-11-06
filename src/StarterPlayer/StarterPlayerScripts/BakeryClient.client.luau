@@ -582,9 +582,9 @@ function panels.Decorate()
 			addRow(item.Name, detail, actions)
 		end
 	end
-	addRow("Move or store items", "Tap a placed item to put it back in storage", {
+	addRow("Move things", "Move or turn anything in your bakery, including the oven and counters", {
 		{
-			Text = "Edit",
+			Text = "Move",
 			Color = BLUE,
 			OnClick = function()
 				startPlacing(nil)
