@@ -516,6 +516,44 @@ local function showBoughtStations(plot, data)
 	end
 end
 
+-- How each wall part changes as the bakery grows, per stud the side walls move out and
+-- per stud the back wall moves back. Side and Back are how far the part slides, and
+-- GrowX and GrowZ are how much longer it gets, all in floor space.
+local WALL_GROWTH = {
+	BackWall = { Side = 0, Back = -1, GrowX = 2, GrowZ = 0 },
+	TrimBack = { Side = 0, Back = -1, GrowX = 2, GrowZ = 0 },
+	LeftWall = { Side = -1, Back = -0.5, GrowX = 0, GrowZ = 1 },
+	TrimLeft = { Side = -1, Back = -0.5, GrowX = 0, GrowZ = 1 },
+	RightWall = { Side = 1, Back = -0.5, GrowX = 0, GrowZ = 1 },
+	TrimRight = { Side = 1, Back = -0.5, GrowX = 0, GrowZ = 1 },
+	FrontLeft = { Side = -0.5, Back = 0, GrowX = 1, GrowZ = 0 },
+	TrimFrontLeft = { Side = -0.5, Back = 0, GrowX = 1, GrowZ = 0 },
+	FrontRight = { Side = 0.5, Back = 0, GrowX = 1, GrowZ = 0 },
+	TrimFrontRight = { Side = 0.5, Back = 0, GrowX = 1, GrowZ = 0 },
+}
+
+-- Moves the walls out to an expansion level and lays floor under the new space. The
+-- original floor never moves, since floor space is measured from it. The extra floor sits
+-- just below it, so the two never flicker where they overlap.
+local function applyExpansion(plot, level)
+	local bounds = Layout.Bounds(level)
+	local side = Layout.Start.MinX - bounds.MinX
+	local back = Layout.Start.MinZ - bounds.MinZ
+	for part, start in plot.wallStarts do
+		local rule = WALL_GROWTH[part.Name]
+		part.Size = start.Size + Vector3.new(rule.GrowX * side, 0, rule.GrowZ * back)
+		part.CFrame = start.CFrame + plot.floorTop:VectorToWorldSpace(Vector3.new(rule.Side * side, 0, rule.Back * back))
+	end
+	local floor, extension = plot.model.Floor, plot.floorExtension
+	if level == 0 then
+		extension.Parent = nil
+		return
+	end
+	extension.Size = floor.Size + Vector3.new(2 * side, 0, back)
+	extension.CFrame = floor.CFrame * CFrame.new(0, -0.02, -back / 2)
+	extension.Parent = plot.model
+end
+
 local function stationEntries(plot, data)
 	local entries = {}
 	for id in plot.stations do
@@ -1019,6 +1057,31 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 	syncStats(player)
 end)
 
+-- When the bakery grows from the old bounds to the new, wall pieces go with the wall they
+-- hang on. Furniture and stations stay where they are.
+local function moveWallPieces(plot, data, old, new)
+	for key, entry in data.Placed do
+		local item = Config.GetItem(entry.Id)
+		if item.Wall then
+			local rect = Layout.Rect(Layout.ItemShape(item), entry)
+			local moved = true
+			if entry.R == 0 and rect.MinZ == old.MinZ then
+				entry.Z -= old.MinZ - new.MinZ
+			elseif entry.R == 1 and rect.MaxX == old.MaxX then
+				entry.X += new.MaxX - old.MaxX
+			elseif entry.R == 3 and rect.MinX == old.MinX then
+				entry.X -= old.MinX - new.MinX
+			else
+				moved = false
+			end
+			if moved then
+				unbuildPlaced(plot, key)
+				buildPlaced(plot, data, key)
+			end
+		end
+	end
+end
+
 -- Shop
 local function buy(player, data, cost)
 	if data.Coins < cost then
@@ -1095,6 +1158,16 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id)
 			moveStation(plot, "LuxuryOven", entry)
 			syncStats(player)
 			notify(player, "Luxury Oven bought! It's in your bakery. Move it any time with Decorate", "Coin")
+		end
+	elseif kind == "Expand" then
+		local step = Config.Expansions[data.Expansion + 1]
+		if step and buy(player, data, step.Coins) then
+			local old = plotBounds(data)
+			data.Expansion += 1
+			applyExpansion(plot, data.Expansion)
+			moveWallPieces(plot, data, old, plotBounds(data))
+			syncStats(player)
+			notify(player, "Your bakery is bigger! Decorate the new space", "Coin")
 		end
 	end
 end)
@@ -1808,6 +1881,7 @@ local function claimPlot(player)
 			setActive(plot.cookbookPrompt, true)
 			setActive(plot.pantryPrompt, true)
 			setActive(plot.packingPrompt, true)
+			applyExpansion(plot, data.Expansion)
 			showBoughtStations(plot, data)
 			placeStations(plot, data)
 			for key in data.Placed do
@@ -1857,6 +1931,7 @@ local function releasePlot(player)
 	plot.helpersFolder:ClearAllChildren()
 	showBoughtStations(plot, nil)
 	placeStations(plot, nil)
+	applyExpansion(plot, 0)
 	removeCrate(plot)
 end
 
@@ -2116,6 +2191,15 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 	for slot in Config.DeliveryTiers do
 		plot.orderTokens[slot] = 0
 	end
+	-- The walls' starting sizes and spots, and spare floor for bigger bakeries.
+	plot.wallStarts = {}
+	for _, part in model.Walls:GetChildren() do
+		if WALL_GROWTH[part.Name] then
+			plot.wallStarts[part] = { Size = part.Size, CFrame = part.CFrame }
+		end
+	end
+	plot.floorExtension = floor:Clone()
+	plot.floorExtension.Name = "FloorExtension"
 	for _, station in Layout.Stations do
 		setUpStation(plot, station)
 	end
