@@ -468,6 +468,11 @@ local function setUpStation(plot, station)
 	plot.stationShapes[station.Id] = shape
 end
 
+-- The owner's floor inside the walls, or the starting size when nobody owns the bakery.
+local function plotBounds(data)
+	return Layout.Bounds(data and data.Expansion or 0)
+end
+
 local function stationEntry(plot, data, id)
 	return data and data.Stations[id] or plot.stations[id].default
 end
@@ -490,7 +495,7 @@ local function placeStations(plot, data)
 	for id, station in plot.stations do
 		if data and data.Stations[id] then
 			local rect = Layout.Rect(station.shape, data.Stations[id])
-			if rect.MaxX > Layout.MaxX or rect.MaxZ > Layout.MaxZ then
+			if not Layout.Inside(rect, plotBounds(data)) then
 				data.Stations[id] = nil
 			end
 		end
@@ -531,15 +536,16 @@ local function freeStationSpot(plot, data, id)
 	local station = Layout.GetStation(id)
 	local shape = plot.stations[id].shape
 	local others = layoutThings(plot, data)
+	local bounds = plotBounds(data)
 	local function fits(entry)
-		return (Layout.Check(Layout.StationThing(station, shape, entry), others))
+		return (Layout.Check(Layout.StationThing(station, shape, entry), others, bounds))
 	end
 	local default = plot.stations[id].default
 	if fits(default) then
 		return { X = default.X, Z = default.Z, R = default.R }
 	end
-	for z = 0, Layout.Rows - shape.D do
-		for x = 0, Layout.Columns - shape.W do
+	for z = bounds.MinZ - Layout.MinZ, bounds.MaxZ - Layout.MinZ - shape.D do
+		for x = bounds.MinX - Layout.MinX, bounds.MaxX - Layout.MinX - shape.W do
 			local entry = { X = x, Z = z, R = 0 }
 			if fits(entry) then
 				return entry
@@ -595,6 +601,8 @@ local function syncStats(player)
 		Placed = data.Placed,
 		Stations = plot and stationEntries(plot, data) or {},
 		LuxuryOven = data.LuxuryOven,
+		Expansion = data.Expansion,
+		Paint = data.Paint,
 		Charm = totalCharm(data),
 		Orders = orders,
 		CanAfford = canAffordUpgrade(data),
@@ -989,7 +997,7 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 	if wall ~= (entry.Y ~= nil) then
 		return
 	end
-	local fits, reason = Layout.Check(thing, layoutThings(plot, data))
+	local fits, reason = Layout.Check(thing, layoutThings(plot, data), plotBounds(data))
 	if not fits then
 		notify(player, reason)
 		syncStats(player)
