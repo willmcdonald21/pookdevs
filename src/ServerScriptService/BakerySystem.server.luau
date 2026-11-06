@@ -554,6 +554,17 @@ local function applyExpansion(plot, level)
 	extension.Parent = plot.model
 end
 
+-- Colours the walls and oven with the owner's paint, or their starting colours when
+-- data is nil. Display cases are painted when they're built.
+local function applyPaint(plot, data)
+	for _, target in Config.PaintTargets do
+		local paint = data and Config.GetPaint(data.Paint[target.Id])
+		for part, original in plot.paintParts[target.Id] do
+			part.Color = paint and paint.Color or original
+		end
+	end
+end
+
 local function stationEntries(plot, data)
 	local entries = {}
 	for id in plot.stations do
@@ -938,7 +949,9 @@ local function buildPlaced(plot, data, key)
 	local item = Config.GetItem(entry.Id)
 	local origin = Layout.CFrame(plot.floorTop, Layout.ItemShape(item), entry)
 	-- Wall pieces aren't solid, so nobody gets caught on them or stands on top of them.
-	local model = ItemBuilder.Build(item, 1, origin, not item.Flat and not item.Wall)
+	-- A painted display case is built in its colour.
+	local paint = entry.Paint and Config.GetPaint(entry.Paint)
+	local model = ItemBuilder.Build(item, 1, origin, not item.Flat and not item.Wall, paint and paint.Color)
 	ItemBuilder.Anchor(model)
 	model.Name = "Placed_" .. key
 	if item.Sparkles then
@@ -1025,6 +1038,8 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 		thing = Layout.StationThing(Layout.GetStation(id), plot.stations[id].shape, entry)
 	elseif data.Placed[id] then
 		entry.Id = data.Placed[id].Id
+		-- A painted case keeps its colour when it moves.
+		entry.Paint = data.Placed[id].Paint
 		key = id
 		thing = Layout.ItemThing(key, entry)
 	else
@@ -1101,7 +1116,9 @@ local function buyWithStars(player, data, cost)
 	return true
 end
 
-purchaseEvent.OnServerEvent:Connect(function(player, kind, id)
+-- "Paint" takes a paint target's Id and a paint Id, and "PaintCase" a placed display
+-- case's key and a paint Id.
+purchaseEvent.OnServerEvent:Connect(function(player, kind, id, paintId)
 	local data = PlayerData.Get(player)
 	local plot = playerPlots[player]
 	if not data or not plot then
@@ -1168,6 +1185,33 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id)
 			moveWallPieces(plot, data, old, plotBounds(data))
 			syncStats(player)
 			notify(player, "Your bakery is bigger! Decorate the new space", "Coin")
+		end
+	elseif kind == "Paint" or kind == "PaintCase" then
+		local paint = Config.GetPaint(paintId)
+		local target = kind == "Paint" and Config.GetPaintTarget(id)
+		local case = kind == "PaintCase" and type(id) == "string" and data.Placed[id]
+		local name, current, cost
+		if target and paint and Config.CanPaint(target, paint) then
+			name, current, cost = target.Name, data.Paint[target.Id] or target.Original, target.Coins
+		elseif case and paint and Config.GetItem(case.Id).Slots then
+			name, current, cost = Config.GetItem(case.Id).Name, case.Paint or Config.CaseOriginalPaint, Config.CasePaintCoins
+		else
+			return
+		end
+		if current == paint.Id then
+			notify(player, ("It's already %s"):format(paint.Name))
+		elseif buy(player, data, cost) then
+			if target then
+				data.Paint[target.Id] = paint.Id
+				applyPaint(plot, data)
+			else
+				case.Paint = paint.Id
+				unbuildPlaced(plot, id)
+				buildPlaced(plot, data, id)
+				refreshHelpers(plot, data)
+			end
+			syncStats(player)
+			notify(player, ("%s painted %s!"):format(name, paint.Name), "Coin")
 		end
 	end
 end)
@@ -1882,6 +1926,7 @@ local function claimPlot(player)
 			setActive(plot.pantryPrompt, true)
 			setActive(plot.packingPrompt, true)
 			applyExpansion(plot, data.Expansion)
+			applyPaint(plot, data)
 			showBoughtStations(plot, data)
 			placeStations(plot, data)
 			for key in data.Placed do
@@ -1932,6 +1977,7 @@ local function releasePlot(player)
 	showBoughtStations(plot, nil)
 	placeStations(plot, nil)
 	applyExpansion(plot, 0)
+	applyPaint(plot, nil)
 	removeCrate(plot)
 end
 
@@ -2200,6 +2246,18 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 	end
 	plot.floorExtension = floor:Clone()
 	plot.floorExtension.Name = "FloorExtension"
+	-- Each paintable wall and oven part's starting colour, by paint target.
+	plot.paintParts = {}
+	for _, target in Config.PaintTargets do
+		local parts = {}
+		for _, name in target.Walls or {} do
+			parts[model.Walls[name]] = model.Walls[name].Color
+		end
+		for _, name in target.Oven or {} do
+			parts[model.Oven[name]] = model.Oven[name].Color
+		end
+		plot.paintParts[target.Id] = parts
+	end
 	for _, station in Layout.Stations do
 		setUpStation(plot, station)
 	end
