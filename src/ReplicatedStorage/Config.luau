@@ -261,7 +261,7 @@ Config.Upgrades = {
 			if not level.WalkSpeed then
 				return "Not hired yet"
 			end
-			return ("Fetches ingredients and bakes your last treat again. Walks at speed %d"):format(level.WalkSpeed)
+			return ("Fetches ingredients and bakes a random treat you have them for. Walks at speed %d"):format(level.WalkSpeed)
 		end,
 	},
 	{
@@ -964,6 +964,27 @@ Config.CustomerSpeed = 8
 Config.BrowseTime = 1.5
 -- Golden customers wear a crown, pay PayScale times the price, and sometimes tip a Star.
 Config.GoldenCustomer = { Chance = 1 / 12, PayScale = 3, StarChance = 1 / 3 }
+-- Customers arrive at random. The wait before the next one is the usual interval times a
+-- random factor, mostly short with an occasional long lull, kept between Min and Max.
+-- Sometimes two friends come at once (PairChance), and the waits stretch to make up for it.
+Config.CustomerGap = { Min = 0.3, Max = 2.5, PairChance = 0.15 }
+-- A customer who gets the treat they wanted tips a random share of its price, from Min to Max.
+Config.WantedTip = { Min = 0, Max = 0.25 }
+
+-- Townsfolk stroll around the plaza, and customers are townsfolk who head into a bakery.
+-- People walk in from the edge of town, visit a few spots, then walk out again. The crowd
+-- is Base people plus PerBakery for each owned bakery, up to Max. Each walks at
+-- CustomerSpeed times a random Speed factor and pauses for StopTime seconds at each stop.
+Config.Townsfolk = {
+	Base = 6,
+	PerBakery = 2,
+	Max = 16,
+	Stops = { 2, 5 },
+	StopsAfterShopping = { 1, 3 },
+	StopTime = { 2, 8 },
+	Speed = { 0.8, 1.15 },
+	ArrivalGap = { 2, 6 },
+}
 
 Config.AutosaveInterval = 60
 
