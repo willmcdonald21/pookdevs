@@ -3,6 +3,8 @@
 -- Positions are in floor space: the floor's centre is the origin and the door is at +Z.
 -- A grid entry is { X, Z, R }. X and Z are the whole-number cell of the piece's corner
 -- with the lowest coordinates, and R is how many quarter turns it has been rotated.
+-- A wall piece's entry also has Y, the height of its bottom. Its cells are the strip along
+-- the wall it hangs on, and its R makes it face away from that wall.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
@@ -24,6 +26,9 @@ Layout.MaxZ = Layout.MinZ + Layout.Rows
 Layout.Entrance = { MinX = -7, MaxX = 7, MinZ = 15, MaxZ = 19 }
 -- Display cases and the checkout counter keep this many cells clear in front.
 Layout.FrontDepth = 3
+-- Wall pieces hang on the back, left and right walls, below the trim along the top. The
+-- front is a low wall under the sign, so nothing hangs there.
+Layout.WallHeight = 13
 
 -- Bakery pieces that can be moved but not stored. Path is the instance's name in the
 -- plot, and Facing is the side that faces customers before any rotation.
@@ -52,7 +57,8 @@ end
 local itemShapes = {}
 
 -- An item's size in cells, its height, and the centre of its parts, in its own space,
--- where the front is -Z. Unrotated, it is turned to face the door.
+-- where the front is -Z. Unrotated, it is turned to face the door. A wall item's back
+-- sits on the edge of its cells, so it hangs flat against the wall.
 function Layout.ItemShape(item)
 	local shape = itemShapes[item.Id]
 	if shape then
@@ -60,10 +66,13 @@ function Layout.ItemShape(item)
 	end
 	local minX, maxX, minZ, maxZ, top = math.huge, -math.huge, math.huge, -math.huge, 0
 	for _, spec in item.Parts do
-		-- Discs are cylinders stood upright, so their Height is vertical.
+		-- Discs are cylinders stood upright, so their Height is vertical. Plates face the
+		-- front, so their Height is their depth.
 		local halfX, halfZ, halfY
 		if spec.Kind == "Disc" then
 			halfX, halfZ, halfY = spec.Diameter / 2, spec.Diameter / 2, spec.Height / 2
+		elseif spec.Kind == "Plate" then
+			halfX, halfZ, halfY = spec.Diameter / 2, spec.Height / 2, spec.Diameter / 2
 		elseif spec.Kind == "Ball" then
 			halfX, halfZ, halfY = spec.Diameter / 2, spec.Diameter / 2, spec.Diameter / 2
 		else
@@ -76,12 +85,13 @@ function Layout.ItemShape(item)
 		maxZ = math.max(maxZ, z + halfZ)
 		top = math.max(top, spec.Y + halfY)
 	end
+	local depth = Layout.Cells(maxZ - minZ)
 	shape = {
 		W = Layout.Cells(maxX - minX),
-		D = Layout.Cells(maxZ - minZ),
+		D = depth,
 		H = top,
 		CenterX = (minX + maxX) / 2,
-		CenterZ = (minZ + maxZ) / 2,
+		CenterZ = item.Wall and maxZ - depth / 2 or (minZ + maxZ) / 2,
 		Facing = -Vector3.zAxis,
 		BaseYaw = math.pi,
 	}
@@ -138,10 +148,10 @@ function Layout.FrontRect(rect, facing)
 	return { MinX = rect.MinX, MaxX = rect.MaxX, MinZ = rect.MinZ - depth, MaxZ = rect.MinZ }
 end
 
--- Where a piece's own origin goes so its parts sit centred on its cells. floorTop is
--- the floor's CFrame moved up to its top surface.
+-- Where a piece's own origin goes so its parts sit centred on its cells, lifted to its
+-- height on the wall. floorTop is the floor's CFrame moved up to its top surface.
 function Layout.CFrame(floorTop, shape, entry)
-	local center = Layout.Center(Layout.Rect(shape, entry))
+	local center = Layout.Center(Layout.Rect(shape, entry)) + Vector3.new(0, entry.Y or 0, 0)
 	return floorTop
 		* CFrame.new(center)
 		* CFrame.Angles(0, Layout.Yaw(shape, entry.R), 0)
@@ -164,8 +174,33 @@ function Layout.Rotated(shape, entry)
 	return Layout.EntryAt(shape, Layout.Center(Layout.Rect(shape, entry)), (entry.R + 1) % 4)
 end
 
+-- The wall entry that puts a wall piece's centre as near as it can to a point, on the
+-- nearest of the back (R 0), right (R 1) and left (R 3) walls. point is in floor space,
+-- with Y the height above the floor.
+function Layout.WallEntryAt(shape, point)
+	local toBack, toLeft, toRight = point.Z - Layout.MinZ, point.X - Layout.MinX, Layout.MaxX - point.X
+	local r = 3
+	if toBack <= toLeft and toBack <= toRight then
+		r = 0
+	elseif toRight <= toLeft then
+		r = 1
+	end
+	local entry = Layout.EntryAt(shape, point, r)
+	if r == 0 then
+		entry.Z = 0
+	elseif r == 1 then
+		entry.X = Layout.Columns - shape.D
+	else
+		entry.X = 0
+	end
+	local highest = math.max(0, math.floor(Layout.WallHeight - shape.H))
+	entry.Y = math.clamp(math.round(point.Y - shape.H / 2), 0, highest)
+	return entry
+end
+
 -- Turns saved or sent values into an entry, or nil when they aren't whole numbers in range.
-function Layout.CleanEntry(x, z, r)
+-- y is only given for wall pieces.
+function Layout.CleanEntry(x, z, r, y)
 	if type(x) ~= "number" or type(z) ~= "number" or type(r) ~= "number" then
 		return nil
 	end
@@ -175,19 +210,24 @@ function Layout.CleanEntry(x, z, r)
 	if x < 0 or x >= Layout.Columns or z < 0 or z >= Layout.Rows or r < 0 or r > 3 then
 		return nil
 	end
-	return { X = x, Z = z, R = r }
+	if y ~= nil and (type(y) ~= "number" or y % 1 ~= 0 or y < 0 or y >= Layout.WallHeight) then
+		return nil
+	end
+	return { X = x, Z = z, R = r, Y = y }
 end
 
-local function describe(key, name, shape, entry, flat, needsFront)
+local function describe(key, name, shape, entry, flat, needsFront, wall)
 	local rect = Layout.Rect(shape, entry)
 	local facing = Layout.Facing(shape, entry.R)
 	return {
 		Key = key,
 		Name = name,
 		Rect = rect,
+		Bottom = entry.Y or 0,
 		Height = shape.H,
 		Facing = facing,
 		Flat = flat,
+		Wall = wall,
 		Front = needsFront and Layout.FrontRect(rect, facing) or nil,
 	}
 end
@@ -195,11 +235,11 @@ end
 -- A piece as the placement rules see it. entry.Id is the item's Id.
 function Layout.ItemThing(key, entry)
 	local item = Config.GetItem(entry.Id)
-	return describe(key, item.Name, Layout.ItemShape(item), entry, item.Flat == true, item.Slots ~= nil)
+	return describe(key, item.Name, Layout.ItemShape(item), entry, item.Flat == true, item.Slots ~= nil, item.Wall == true)
 end
 
 function Layout.StationThing(station, shape, entry)
-	return describe(station.Id, station.Name, shape, entry, false, station.NeedsFront == true)
+	return describe(station.Id, station.Name, shape, entry, false, station.NeedsFront == true, false)
 end
 
 -- Every piece in a bakery. stationShapes maps each station Id to its shape.
@@ -225,20 +265,48 @@ local function inside(rect)
 	return rect.MinX >= Layout.MinX and rect.MaxX <= Layout.MaxX and rect.MinZ >= Layout.MinZ and rect.MaxZ <= Layout.MaxZ
 end
 
+local function overlapsHeight(a, b)
+	return a.Bottom < b.Bottom + b.Height and b.Bottom < a.Bottom + a.Height
+end
+
+-- True when a wall piece is inside the bakery, against the wall it faces away from, and
+-- below the trim.
+function Layout.OnWall(thing)
+	local rect, facing = thing.Rect, thing.Facing
+	local against = (facing.Z > 0 and rect.MinZ == Layout.MinZ)
+		or (facing.X < 0 and rect.MaxX == Layout.MaxX)
+		or (facing.X > 0 and rect.MinX == Layout.MinX)
+	return against and inside(rect) and thing.Bottom >= 0 and thing.Bottom + thing.Height <= Layout.WallHeight
+end
+
 local function roomInFront(name)
 	return ("Customers need room in front of the %s"):format(name:lower())
 end
 
+local function inTheWay(thing, other)
+	if thing.Wall and not other.Wall and other.Bottom + other.Height + thing.Height <= Layout.WallHeight then
+		return ("Hang it above the %s"):format(other.Name:lower())
+	elseif thing.Wall or other.Wall then
+		return ("The %s is in the way"):format(other.Name:lower())
+	end
+	return "Something's in the way"
+end
+
 -- Returns true when the piece fits among the others, or false and a reason to show.
 -- Rugs only clash with other rugs, so they can go under furniture and in the doorway.
+-- Solid pieces clash where their cells and their heights overlap, so a wall piece can
+-- hang above furniture. Wall pieces are up out of the way of the doorway and customers.
 function Layout.Check(thing, others)
 	if not inside(thing.Rect) then
 		return false, "Keep it inside your bakery"
 	end
+	if thing.Wall and not Layout.OnWall(thing) then
+		return false, "Hang it on the back or side walls"
+	end
 	if thing.Front and not inside(thing.Front) then
 		return false, roomInFront(thing.Name)
 	end
-	if not thing.Flat and overlaps(thing.Rect, Layout.Entrance) then
+	if not thing.Flat and not thing.Wall and overlaps(thing.Rect, Layout.Entrance) then
 		return false, "Keep the doorway clear for customers"
 	end
 	for _, other in others do
@@ -248,14 +316,16 @@ function Layout.Check(thing, others)
 					return false, "There's already a rug there"
 				end
 			elseif not other.Flat then
-				if overlaps(thing.Rect, other.Rect) then
-					return false, "Something's in the way"
+				if overlaps(thing.Rect, other.Rect) and overlapsHeight(thing, other) then
+					return false, inTheWay(thing, other)
 				end
-				if other.Front and overlaps(thing.Rect, other.Front) then
-					return false, roomInFront(other.Name)
-				end
-				if thing.Front and overlaps(thing.Front, other.Rect) then
-					return false, roomInFront(thing.Name)
+				if not thing.Wall and not other.Wall then
+					if other.Front and overlaps(thing.Rect, other.Front) then
+						return false, roomInFront(other.Name)
+					end
+					if thing.Front and overlaps(thing.Front, other.Rect) then
+						return false, roomInFront(thing.Name)
+					end
 				end
 			end
 		end
