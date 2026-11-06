@@ -1180,19 +1180,35 @@ local function floorPointAt(plot, ray)
 	return result and plot.Floor.CFrame:PointToObjectSpace(result.Position)
 end
 
--- Solid pieces win over rugs underneath them.
-local function pieceAt(plot, point)
-	local flat = nil
+-- The nearest piece the pointer passes through. Each piece is a box made of its grid
+-- cells and its height, so clicking the front of a tall piece by a wall still finds it.
+local function pieceOnRay(plot, ray)
+	local top = floorTop(plot)
+	local origin = top:PointToObjectSpace(ray.Origin)
+	local direction = top:VectorToObjectSpace(ray.Direction)
+	local nearest, nearestDistance = nil, math.huge
 	for _, thing in allThings(plot) do
 		local rect = thing.Rect
-		if point.X >= rect.MinX and point.X <= rect.MaxX and point.Z >= rect.MinZ and point.Z <= rect.MaxZ then
-			if not thing.Flat then
-				return thing
+		local low = Vector3.new(rect.MinX, 0, rect.MinZ)
+		local high = Vector3.new(rect.MaxX, thing.Height, rect.MaxZ)
+		local enter, exit = 0, math.huge
+		for _, axis in { "X", "Y", "Z" } do
+			local start, step = origin[axis], direction[axis]
+			if math.abs(step) < 1e-6 then
+				if start < low[axis] or start > high[axis] then
+					enter = math.huge
+				end
+			else
+				local near, far = (low[axis] - start) / step, (high[axis] - start) / step
+				enter = math.max(enter, math.min(near, far))
+				exit = math.min(exit, math.max(near, far))
 			end
-			flat = flat or thing
+		end
+		if enter <= exit and enter < nearestDistance then
+			nearest, nearestDistance = thing, enter
 		end
 	end
-	return flat
+	return nearest
 end
 
 local function pickUp(thing)
@@ -1267,13 +1283,14 @@ RunService.RenderStepped:Connect(function()
 	if pointerOverGui(mouse - GuiService:GetGuiInset()) then
 		return
 	end
-	local point = floorPointAt(plot, Workspace.CurrentCamera:ViewportPointToRay(mouse.X, mouse.Y))
+	local ray = Workspace.CurrentCamera:ViewportPointToRay(mouse.X, mouse.Y)
 	if held then
+		local point = floorPointAt(plot, ray)
 		if point then
 			moveHeldTo(point)
 		end
 	else
-		local thing = point and pieceAt(plot, point)
+		local thing = pieceOnRay(plot, ray)
 		hoverHighlight.Adornee = thing and pieceInstance(plot, thing.Key)
 		placeBanner.Text = thing and ("Click to move the " .. thing.Name:lower()) or MOVE_HINT
 	end
@@ -1291,8 +1308,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 			tryPlace()
 		else
 			local ray = Workspace.CurrentCamera:ScreenPointToRay(input.Position.X, input.Position.Y)
-			local point = floorPointAt(plot, ray)
-			local thing = point and pieceAt(plot, point)
+			local thing = pieceOnRay(plot, ray)
 			if thing then
 				pickUp(thing)
 			end
@@ -1307,14 +1323,14 @@ UserInputService.TouchTap:Connect(function(positions, processed)
 		return
 	end
 	local position = positions[1]
-	local point = floorPointAt(plot, Workspace.CurrentCamera:ScreenPointToRay(position.X, position.Y))
-	if not point then
-		return
-	end
+	local ray = Workspace.CurrentCamera:ScreenPointToRay(position.X, position.Y)
 	if held then
-		moveHeldTo(point)
+		local point = floorPointAt(plot, ray)
+		if point then
+			moveHeldTo(point)
+		end
 	else
-		local thing = pieceAt(plot, point)
+		local thing = pieceOnRay(plot, ray)
 		if thing then
 			pickUp(thing)
 		end
