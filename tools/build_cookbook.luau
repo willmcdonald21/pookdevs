@@ -2,6 +2,12 @@
 -- open cookbook on top. Safe to run again: it removes its own parts first.
 -- The part keeps the name UpgradeStation, with its Prompt and Status, so scripts still find it.
 
+-- The wooden base's height. With the marble slab on top, the counter is 3.8 studs tall,
+-- the same as the delivery counter.
+local BASE_HEIGHT = 3.5
+-- How far the "Cookbook" label floats above the top of the base.
+local LABEL_HEIGHT = 2
+
 local WOOD = Color3.fromRGB(160, 110, 75)
 local MARBLE = Color3.fromRGB(245, 240, 235)
 local COVER = Color3.fromRGB(190, 45, 65)
@@ -33,6 +39,11 @@ for _, plot in workspace.Plots:GetChildren() do
 	end
 	station.Color = WOOD
 	station.Material = Enum.Material.Wood
+	-- Resize from the bottom so the counter stays standing on the floor.
+	local bottom = station.CFrame * CFrame.new(0, -station.Size.Y / 2, 0)
+	station.Size = Vector3.new(station.Size.X, BASE_HEIGHT, station.Size.Z)
+	station.CFrame = bottom * CFrame.new(0, BASE_HEIGHT / 2, 0)
+	station.Status.StudsOffset = Vector3.new(0, BASE_HEIGHT / 2 + LABEL_HEIGHT, 0)
 	local top = station.Size.Y / 2
 	local slab = part("CounterSlab", Vector3.new(station.Size.X + 0.4, 0.3, station.Size.Z + 0.4), station.CFrame * CFrame.new(0, top + 0.15, 0), MARBLE, Enum.Material.Marble, station)
 	slab.CanCollide = true
