@@ -1,15 +1,11 @@
 -- Edit-time builder for free placement decorating. Safe to run again. In each bakery it:
 -- removes the 16 decoration squares and the countertop display case (everyone gets a
--- free floor-standing case instead), groups the checkout counter into a Checkout model
--- with a cash register where the case was, rebuilds the delivery station as a
--- PackingStation counter with a laptop (removing the hatch and board on the back wall,
--- which couldn't move with it), and moves the player spawn just inside the door, which
--- is always kept clear.
+-- free floor-standing case instead), groups the checkout counter into a Checkout model,
+-- rebuilds the delivery station as a PackingStation counter with a laptop (removing the
+-- hatch and board on the back wall, which couldn't move with it), and moves the player
+-- spawn just inside the door, which is always kept clear.
+-- tools/build_checkout.luau sizes the checkout counter and builds its cash register.
 
-local CREAM = Color3.fromRGB(255, 245, 230)
-local PINK = Color3.fromRGB(240, 150, 175)
-local DARK = Color3.fromRGB(70, 55, 65)
-local SCREEN = Color3.fromRGB(170, 230, 200)
 -- The same wood and marble as the checkout counter.
 local COUNTER_WOOD = Color3.fromRGB(190, 130, 95)
 local COUNTER_MARBLE = Color3.fromRGB(255, 250, 245)
@@ -61,23 +57,7 @@ for _, plot in workspace.Plots:GetChildren() do
 		payMarker:Destroy()
 	end
 
-	local checkout = group(plot, "Checkout", { "CounterBase", "CounterTop", "CakeBase", "CakeIcing", "Cherry" })
-	local oldRegister = checkout:FindFirstChild("Register")
-	if oldRegister then
-		oldRegister:Destroy()
-	end
-	-- The cashier stands on the kitchen side (-Z), so the screen and drawer face that way.
-	local top = checkout.CounterTop
-	local base = top.CFrame * CFrame.new(4.5, top.Size.Y / 2, 0)
-	local register = Instance.new("Model")
-	register.Name = "Register"
-	part("Body", Vector3.new(2.4, 1, 1.8), base * CFrame.new(0, 0.5, 0), CREAM, nil, register)
-	part("Trim", Vector3.new(2.5, 0.15, 1.9), base * CFrame.new(0, 1.05, 0), PINK, nil, register)
-	part("Drawer", Vector3.new(2, 0.35, 0.1), base * CFrame.new(0, 0.35, -0.92), PINK, nil, register)
-	local screenCFrame = base * CFrame.new(0, 1.65, -0.35) * CFrame.Angles(math.rad(-15), 0, 0)
-	part("Screen", Vector3.new(1.6, 0.9, 0.15), screenCFrame, DARK, nil, register)
-	part("Display", Vector3.new(1.35, 0.65, 0.05), screenCFrame * CFrame.new(0, 0, -0.08), SCREEN, Enum.Material.Neon, register)
-	register.Parent = checkout
+	group(plot, "Checkout", { "CounterBase", "CounterTop", "CakeBase", "CakeIcing", "Cherry" })
 
 	local packing = group(plot, "PackingStation", { "PackingTable", "PackingBelt" })
 	for _, name in { "Hatch", "DeliveryBoard" } do
