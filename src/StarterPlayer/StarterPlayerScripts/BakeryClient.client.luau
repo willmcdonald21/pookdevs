@@ -848,8 +848,9 @@ local function myPlot()
 end
 
 -- Decorating
--- Pieces snap to a grid on your floor while the camera and controls work as normal.
--- The preview uses the same Layout rules as the server, which checks every spot again.
+-- Pieces snap to a grid on your floor, or on your walls for wall pieces, while the camera
+-- and controls work as normal. The preview uses the same Layout rules as the server,
+-- which checks every spot again.
 local OK_COLOR = Color3.fromRGB(120, 220, 140)
 local BLOCKED_COLOR = Color3.fromRGB(225, 95, 95)
 local FRONT_COLOR = Color3.fromRGB(150, 200, 255)
@@ -858,14 +859,20 @@ local GHOST_TRANSPARENCY = 0.45
 local ARROW_ANGLE = math.rad(35)
 local MOVE_HINT = "Tap or click anything in your bakery to move it"
 local ROTATE_HINT = "Pick something up first, then rotate it"
+local WALL_ROTATE_HINT = "Wall pieces always face into the room"
 local BANNER_HINT_TIME = 2
+-- A new wall piece starts with its middle at about head height.
+local WALL_START_HEIGHT = 6
+local WALL_NAMES = { "BackWall", "LeftWall", "RightWall" }
 -- Copies of a station keep their parts but none of their prompts, labels or effects.
-local GHOST_REMOVES = { "ProximityPrompt", "BillboardGui", "ParticleEmitter", "Sparkles", "Sound", "ClickDetector" }
+local GHOST_REMOVES =
+	{ "ProximityPrompt", "BillboardGui", "ParticleEmitter", "Sparkles", "Sound", "ClickDetector", "PointLight" }
 
 local decorating = false
 local held = nil
 local pending = nil
 local grid = nil
+local wallGrid = nil
 local hiddenGuis = {}
 local bannerHintUntil = 0
 
@@ -968,8 +975,45 @@ local function showGrid(plot)
 	grid.Parent = Workspace
 end
 
+-- Grid lines on the back and side walls while a wall piece is held. Each wall is given by
+-- one end on the floor, the way it runs, its length and the way it faces.
+local function showWallGrid(plot)
+	local top = floorTop(plot)
+	local height = Layout.WallHeight
+	local corner = Vector3.new(Layout.MinX, 0, Layout.MinZ)
+	local walls = {
+		{ start = corner, along = Vector3.xAxis, length = Layout.Columns, facing = Vector3.zAxis },
+		{ start = corner, along = Vector3.zAxis, length = Layout.Rows, facing = Vector3.xAxis },
+		{ start = Vector3.new(Layout.MaxX, 0, Layout.MinZ), along = Vector3.zAxis, length = Layout.Rows, facing = -Vector3.xAxis },
+	}
+	wallGrid = Instance.new("Folder")
+	wallGrid.Name = "WallGrid"
+	for _, wall in walls do
+		local base = wall.start + wall.facing * 0.02
+		-- Turns a line so its X runs along the wall.
+		local turn = CFrame.lookAt(Vector3.zero, wall.facing)
+		for step = 0, wall.length do
+			local line = markerPart("Line", Vector3.new(0.06, height, 0.02), WHITE, 0.55, wallGrid)
+			line.CFrame = top * CFrame.new(base + wall.along * step + Vector3.new(0, height / 2, 0)) * turn
+		end
+		for row = 0, height do
+			local line = markerPart("Line", Vector3.new(wall.length, 0.06, 0.02), WHITE, 0.55, wallGrid)
+			line.CFrame = top * CFrame.new(base + wall.along * (wall.length / 2) + Vector3.new(0, row, 0)) * turn
+		end
+	end
+	wallGrid.Parent = Workspace
+end
+
+local function hideWallGrid()
+	if wallGrid then
+		wallGrid:Destroy()
+		wallGrid = nil
+	end
+end
+
 -- The outline under the preview: green or red, a blue strip where customers stand, and
--- an arrow showing which way the piece faces.
+-- an arrow showing which way the piece faces. A wall piece's outline is on the wall
+-- behind it, with no arrow.
 local marker = Instance.new("Model")
 marker.Name = "PlaceMarker"
 local markerPad = markerPart("Pad", Vector3.one, OK_COLOR, 0.35, marker)
@@ -995,9 +1039,23 @@ end
 local function updateMarker(top, thing, ok)
 	local rect = thing.Rect
 	local center = Layout.Center(rect)
+	markerPad.Color = ok and OK_COLOR or BLOCKED_COLOR
+	for _, part in { arrowShaft, arrowLeft, arrowRight } do
+		part.Transparency = thing.Wall and 1 or 0
+	end
+	if thing.Wall then
+		local size = flatSize(rect, 0)
+		local depth = math.abs(size:Dot(thing.Facing))
+		local back = center
+			- thing.Facing * (depth / 2 - 0.03)
+			+ Vector3.new(0, thing.Bottom + thing.Height / 2, 0)
+		markerPad.Size = Vector3.new(size.X + size.Z - depth, thing.Height, 0.05)
+		markerPad.CFrame = top * CFrame.lookAt(back, back + thing.Facing)
+		markerFront.Transparency = 1
+		return
+	end
 	markerPad.Size = flatSize(rect, 0.05)
 	markerPad.CFrame = top * CFrame.new(center + Vector3.new(0, 0.05, 0))
-	markerPad.Color = ok and OK_COLOR or BLOCKED_COLOR
 	markerFront.Transparency = thing.Front and 0.5 or 1
 	if thing.Front then
 		markerFront.Size = flatSize(thing.Front, 0.05)
@@ -1058,7 +1116,7 @@ local function heldThing()
 	if held.stationId then
 		return Layout.StationThing(Layout.GetStation(held.stationId), held.shape, entry)
 	end
-	return Layout.ItemThing(held.key or "new", { Id = held.itemId, X = entry.X, Z = entry.Z, R = entry.R })
+	return Layout.ItemThing(held.key or "new", { Id = held.itemId, X = entry.X, Z = entry.Z, R = entry.R, Y = entry.Y })
 end
 
 local function refreshHeld()
@@ -1075,18 +1133,19 @@ local function refreshHeld()
 	local color = ok and OK_COLOR or BLOCKED_COLOR
 	ghostHighlight.FillColor = color
 	ghostHighlight.OutlineColor = color
-	placeBanner.Text = ok and ("%s %s: tap or click the floor to move it"):format(held.key and "Moving" or "Placing", held.name)
-		or reason
+	local action = held.key and "Moving" or "Placing"
+	local surface = held.wall and "a wall" or "the floor"
+	placeBanner.Text = ok and ("%s %s: tap or click %s to move it"):format(action, held.name, surface) or reason
 	placeBanner.BackgroundColor3 = ok and GREEN or BLOCKED_COLOR
 	placeButton.BackgroundColor3 = ok and GREEN or GREY
 end
 
 -- Rotate always shows while decorating so players know it's there. It's grey until
--- something is picked up.
+-- something is picked up, and for wall pieces, which always face into the room.
 local function refreshBar()
 	placeBanner.Visible = decorating
 	placeBar.Visible = decorating
-	rotateButton.BackgroundColor3 = held and BLUE or GREY
+	rotateButton.BackgroundColor3 = (held and not held.wall) and BLUE or GREY
 	placeButton.Visible = held ~= nil
 	putAwayButton.Visible = held ~= nil and held.key ~= nil and held.stationId == nil
 	cancelButton.Visible = held ~= nil
@@ -1100,6 +1159,9 @@ end
 local function hold(info)
 	held = info
 	setHidden(info.original, true)
+	if info.wall then
+		showWallGrid(myPlot())
+	end
 	marker.Parent = Workspace
 	ghostHighlight.Adornee = info.ghost
 	hoverHighlight.Adornee = nil
@@ -1113,7 +1175,8 @@ local function pointInFront(plot)
 	return plot.Floor.CFrame:PointToObjectSpace(position)
 end
 
--- A new item starts in front of you, facing the door. A placed one starts where it is.
+-- A new item starts in front of you, facing the door, or on the wall nearest that spot.
+-- A placed one starts where it is.
 local function holdItem(itemId, key)
 	local plot = myPlot()
 	local item = Config.GetItem(itemId)
@@ -1121,7 +1184,10 @@ local function holdItem(itemId, key)
 	local entry
 	if key then
 		local saved = state.Placed[key]
-		entry = { X = saved.X, Z = saved.Z, R = saved.R }
+		entry = { X = saved.X, Z = saved.Z, R = saved.R, Y = saved.Y }
+	elseif item.Wall then
+		local spot = pointInFront(plot)
+		entry = Layout.WallEntryAt(shape, Vector3.new(spot.X, WALL_START_HEIGHT, spot.Z))
 	else
 		entry = Layout.EntryAt(shape, pointInFront(plot), 0)
 	end
@@ -1129,6 +1195,7 @@ local function holdItem(itemId, key)
 	hold({
 		itemId = itemId,
 		key = key,
+		wall = item.Wall == true,
 		name = item.Name,
 		shape = shape,
 		entry = entry,
@@ -1182,6 +1249,7 @@ local function drop(waiting)
 	held = nil
 	ghostHighlight.Adornee = nil
 	marker.Parent = nil
+	hideWallGrid()
 	if waiting then
 		finishPending()
 		pending = current
@@ -1228,16 +1296,26 @@ startPlacing = function(itemId)
 	end
 end
 
-local function floorPointAt(plot, ray)
+-- Where the pointer meets the floor, or the back and side walls while a wall piece is
+-- held. The point is in floor space, with Y the height above the floor.
+local function surfacePointAt(plot, ray)
+	local surfaces = { plot.Floor }
+	if held and held.wall then
+		surfaces = {}
+		for _, name in WALL_NAMES do
+			table.insert(surfaces, plot.Walls[name])
+		end
+	end
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { plot.Floor }
+	params.FilterDescendantsInstances = surfaces
 	local result = Workspace:Raycast(ray.Origin, ray.Direction * 500, params)
-	return result and plot.Floor.CFrame:PointToObjectSpace(result.Position)
+	return result and floorTop(plot):PointToObjectSpace(result.Position)
 end
 
 -- The nearest piece the pointer passes through. Each piece is a box made of its grid
--- cells and its height, so clicking the front of a tall piece by a wall still finds it.
+-- cells and its height, so clicking the front of a tall piece by a wall still finds it,
+-- and a wall piece is found up on its wall.
 local function pieceOnRay(plot, ray)
 	local top = floorTop(plot)
 	local origin = top:PointToObjectSpace(ray.Origin)
@@ -1245,8 +1323,8 @@ local function pieceOnRay(plot, ray)
 	local nearest, nearestDistance = nil, math.huge
 	for _, thing in allThings(plot) do
 		local rect = thing.Rect
-		local low = Vector3.new(rect.MinX, 0, rect.MinZ)
-		local high = Vector3.new(rect.MaxX, thing.Height, rect.MaxZ)
+		local low = Vector3.new(rect.MinX, thing.Bottom, rect.MinZ)
+		local high = Vector3.new(rect.MaxX, thing.Bottom + thing.Height, rect.MaxZ)
 		local enter, exit = 0, math.huge
 		for _, axis in { "X", "Y", "Z" } do
 			local start, step = origin[axis], direction[axis]
@@ -1276,16 +1354,35 @@ local function pickUp(thing)
 	end
 end
 
+-- A wall piece moves along the walls and up them, and can go to another wall.
 local function moveHeldTo(point)
-	local entry = Layout.EntryAt(held.shape, point, held.entry.R)
-	if entry.X ~= held.entry.X or entry.Z ~= held.entry.Z then
+	local current = held.entry
+	local entry
+	if held.wall then
+		entry = Layout.WallEntryAt(held.shape, point)
+	else
+		entry = Layout.EntryAt(held.shape, point, current.R)
+	end
+	if entry.X ~= current.X or entry.Z ~= current.Z or entry.R ~= current.R or entry.Y ~= current.Y then
 		held.entry = entry
 		refreshHeld()
 	end
 end
 
+-- The held piece's middle, in the same space as surfacePointAt.
+local function heldMiddle()
+	local middle = Layout.Center(Layout.Rect(held.shape, held.entry))
+	if held.wall then
+		return middle + Vector3.new(0, held.entry.Y + held.shape.H / 2, 0)
+	end
+	return middle
+end
+
 local function rotateHeld()
-	if held then
+	if held and held.wall then
+		placeBanner.Text = WALL_ROTATE_HINT
+		bannerHintUntil = os.clock() + BANNER_HINT_TIME
+	elseif held then
 		held.entry = Layout.Rotated(held.shape, held.entry)
 		refreshHeld()
 	elseif decorating then
@@ -1300,9 +1397,9 @@ local function tryPlace()
 	end
 	local entry = held.entry
 	if held.key then
-		placeEvent:FireServer("Move", held.key, entry.X, entry.Z, entry.R)
+		placeEvent:FireServer("Move", held.key, entry.X, entry.Z, entry.R, entry.Y)
 	else
-		placeEvent:FireServer("New", held.itemId, entry.X, entry.Z, entry.R)
+		placeEvent:FireServer("New", held.itemId, entry.X, entry.Z, entry.R, entry.Y)
 	end
 	drop(true)
 end
@@ -1348,13 +1445,14 @@ RunService.RenderStepped:Connect(function()
 	end
 end)
 
-local function screenFloorPoint(plot, position)
-	return floorPointAt(plot, Workspace.CurrentCamera:ScreenPointToRay(position.X, position.Y))
+local function screenPoint(plot, position)
+	return surfacePointAt(plot, Workspace.CurrentCamera:ScreenPointToRay(position.X, position.Y))
 end
 
--- With a mouse, clicking a piece picks it up, and clicking or dragging on the floor moves
--- the held piece. It stays put when the pointer goes to the Rotate or Place button.
--- While dragging, the piece keeps its offset from the pointer so it doesn't jump.
+-- With a mouse, clicking a piece picks it up, and clicking or dragging on the floor, or
+-- on a wall for a wall piece, moves the held piece. It stays put when the pointer goes to
+-- the Rotate or Place button. While dragging, the piece keeps its offset from the pointer
+-- so it doesn't jump.
 local dragOffset = nil
 
 UserInputService.InputBegan:Connect(function(input, processed)
@@ -1365,8 +1463,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	if input.KeyCode == Enum.KeyCode.R then
 		rotateHeld()
 	elseif input.UserInputType == Enum.UserInputType.MouseButton1 and plot then
-		local point = screenFloorPoint(plot, input.Position)
 		if held then
+			local point = screenPoint(plot, input.Position)
 			if point then
 				moveHeldTo(point)
 				dragOffset = Vector3.zero
@@ -1376,7 +1474,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
 			local thing = pieceOnRay(plot, ray)
 			if thing then
 				pickUp(thing)
-				dragOffset = point and Layout.Center(thing.Rect) - Vector3.new(point.X, 0, point.Z)
+				local point = held and screenPoint(plot, input.Position)
+				dragOffset = point and heldMiddle() - point
 			end
 		end
 	end
@@ -1385,7 +1484,7 @@ end)
 UserInputService.InputChanged:Connect(function(input)
 	local plot = myPlot()
 	if dragOffset and held and plot and input.UserInputType == Enum.UserInputType.MouseMovement then
-		local point = screenFloorPoint(plot, input.Position)
+		local point = screenPoint(plot, input.Position)
 		if point then
 			moveHeldTo(point + dragOffset)
 		end
@@ -1398,7 +1497,8 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
--- On a phone, a tap moves the preview there, or picks up the piece that was tapped.
+-- On a phone, a tap moves the preview there, or picks up the piece that was tapped. A
+-- wall piece moves to the wall that was tapped.
 UserInputService.TouchTap:Connect(function(positions, processed)
 	local plot = myPlot()
 	if processed or not decorating or not plot then
@@ -1407,7 +1507,7 @@ UserInputService.TouchTap:Connect(function(positions, processed)
 	local position = positions[1]
 	local ray = Workspace.CurrentCamera:ScreenPointToRay(position.X, position.Y)
 	if held then
-		local point = floorPointAt(plot, ray)
+		local point = surfacePointAt(plot, ray)
 		if point then
 			moveHeldTo(point)
 		end
