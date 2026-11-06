@@ -361,6 +361,16 @@ local function starText(count)
 	return ("%d %s"):format(count, count == 1 and "Star" or "Stars")
 end
 
+-- 25000 becomes "25,000".
+local function withCommas(count)
+	local text = tostring(count)
+	repeat
+		local changed
+		text, changed = text:gsub("^(%d+)(%d%d%d)", "%1,%2")
+	until changed == 0
+	return text
+end
+
 local function salePrice(recipe)
 	local bonus = Config.GetUpgrade("Ingredients").Levels[state.Levels.Ingredients].PriceBonus
 	return math.floor(recipe.Price * (1 + bonus))
@@ -435,6 +445,20 @@ local panels = {}
 
 function panels.Shop()
 	panelTitle.Text = "Bakery Shop"
+	local luxury = Config.LuxuryOven
+	if state.LuxuryOven then
+		addRow(luxury.Name, "In your bakery. Move it any time with Decorate", { { Text = "Owned", Color = PINK } })
+	else
+		addRow(luxury.Name, luxury.Detail, {
+			{
+				Text = withCommas(luxury.Coins) .. " coins",
+				Color = state.Coins >= luxury.Coins and GOLD or GREY,
+				OnClick = function()
+					purchaseEvent:FireServer("LuxuryOven")
+				end,
+			},
+		})
+	end
 	for _, upgrade in Config.Upgrades do
 		local levelIndex = state.Levels[upgrade.Id]
 		local nextLevel = upgrade.Levels[levelIndex + 1]
