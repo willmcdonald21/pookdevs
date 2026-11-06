@@ -10,6 +10,7 @@
 | Town and ingredients | Town square layout, grocery store, ingredients with a pantry shelf and free delivery crate, cookbook counter, new oven, treat shown on the carried tray. See `town-and-ingredients-plan.md` | Built 2026-11-05 |
 | Free placement | Decorating on a 1-stud grid with the normal camera, a Rotate button, and every piece movable, including the oven, pantry, cookbook counter, checkout counter and delivery counter. Customers walk around furniture. See `free-placement-plan.md` | Built 2026-11-05 |
 | Decorating fixes | Click a piece itself to pick it up, so tall pieces by walls work; Rotate always on screen; click or drag the floor to move a held piece; Move things at the top of the menu; delivery station rebuilt as a counter with a laptop, with nothing left on the wall | Built 2026-11-05 |
+| Wall decorations | A Wall tab in the Decorate menu with 8 pieces for the back and side walls: Wall Sconce, Neon Heart Sign, Hanging Ivy, Wall Planter, Cupcake Painting, Sunset Painting, Wall Clock and Chalkboard Menu. They snap to a 1-stud grid along and up the wall, can't overlap furniture that reaches up to them, and add Charm. See `wall-decor-plan.md` | Built 2026-11-05 |
 | 4. Her version | Exclusive items (system built, none assigned yet), publish with limited access, first playtest | In progress |
 | 5. Public launch | Game passes and products, maturity questionnaire, icon, thumbnails, description, publish to 16+ | Not started |
 | 6. Grow | Creator Dashboard analytics, regular updates, seasonal events | Not started |
@@ -17,7 +18,7 @@
 ## Not yet verified
 - **Purchase window:** all passes and products exist and are connected, and a simulated receipt paid out and saved correctly. Studio wouldn't show Roblox's purchase window, so the first full purchase will be in the published game.
 - **Prompts:** during the 2026-11-05 tests, Studio wouldn't show any proximity prompt, even a new test prompt. The oven, cases, cookbook counter, pantry shelf, crate and grocery counter were tested by calling the same server code directly, not by pressing E.
-- **Decorating on a phone:** Studio's simulator doesn't turn simulated clicks into taps, so tapping the floor to move the preview and tapping a piece to pick it up are untested. The mouse controls were tested.
+- **Decorating on a phone:** Studio's simulator doesn't turn simulated clicks into taps, so tapping the floor to move the preview, tapping a wall to move a wall piece, and tapping a piece to pick it up are untested. The mouse controls were tested.
 - **A bakery going back to its default layout** when its owner leaves while another player is in the server.
 - **Live play:** two players at once, a real phone, and a full playthrough at normal prices.
 
