@@ -452,20 +452,6 @@ local panels = {}
 
 function panels.Shop()
 	panelTitle.Text = "Bakery Shop"
-	local luxury = Config.LuxuryOven
-	if state.LuxuryOven then
-		addRow(luxury.Name, "In your bakery. Move it any time with Decorate", { { Text = "Owned", Color = PINK } })
-	else
-		addRow(luxury.Name, luxury.Detail, {
-			{
-				Text = withCommas(luxury.Coins) .. " coins",
-				Color = state.Coins >= luxury.Coins and GOLD or GREY,
-				OnClick = function()
-					purchaseEvent:FireServer("LuxuryOven")
-				end,
-			},
-		})
-	end
 	for _, upgrade in Config.Upgrades do
 		local levelIndex = state.Levels[upgrade.Id]
 		local nextLevel = upgrade.Levels[levelIndex + 1]
@@ -718,9 +704,52 @@ local function paintRows()
 	end
 end
 
--- Floor has everything that stands on the floor, Wall has wall pieces, and Paint colours
--- the walls, oven and cases.
-local DECOR_TABS = { "Floor", "Wall", "Paint" }
+local function sizeText(bounds)
+	return ("%d x %d"):format(bounds.MaxX - bounds.MinX, bounds.MaxZ - bounds.MinZ)
+end
+
+-- The Expansion tab: a bigger bakery, one step at a time, and the Luxury Oven.
+local function expansionRows()
+	local level = state.Expansion
+	local step = Config.Expansions[level + 1]
+	if step then
+		local detail = ("Now %s. Step %d of %d makes it %s"):format(
+			sizeText(Layout.Bounds(level)),
+			level + 1,
+			#Config.Expansions,
+			sizeText(Layout.Bounds(level + 1))
+		)
+		addRow("Bigger Bakery", detail, {
+			{
+				Text = withCommas(step.Coins) .. " coins",
+				Color = state.Coins >= step.Coins and GOLD or GREY,
+				OnClick = function()
+					purchaseEvent:FireServer("Expand")
+				end,
+			},
+		})
+	else
+		addRow("Bigger Bakery", "As big as it gets: " .. sizeText(Layout.Bounds(level)), { { Text = "Biggest!", Color = PINK } })
+	end
+	local luxury = Config.LuxuryOven
+	if state.LuxuryOven then
+		addRow(luxury.Name, "In your bakery. Move it any time with Move things", { { Text = "Owned", Color = PINK } })
+	else
+		addRow(luxury.Name, luxury.Detail, {
+			{
+				Text = withCommas(luxury.Coins) .. " coins",
+				Color = state.Coins >= luxury.Coins and GOLD or GREY,
+				OnClick = function()
+					purchaseEvent:FireServer("LuxuryOven")
+				end,
+			},
+		})
+	end
+end
+
+-- Floor has everything that stands on the floor, Wall has wall pieces, Paint colours the
+-- walls, oven and cases, and Expansion makes the bakery bigger.
+local DECOR_TABS = { "Floor", "Wall", "Paint", "Expansion" }
 local decorTab = "Floor"
 
 function panels.Decorate()
@@ -731,6 +760,9 @@ function panels.Decorate()
 	end)
 	if decorTab == "Paint" then
 		paintRows()
+		return
+	elseif decorTab == "Expansion" then
+		expansionRows()
 		return
 	end
 	addRow("Move things", "Move or turn anything in your bakery, including the oven and counters", {
