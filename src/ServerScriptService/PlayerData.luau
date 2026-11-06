@@ -158,6 +158,8 @@ local function clean(saved)
 		Receipts = {},
 		BoostUntil = cleanCount(saved.BoostUntil),
 		StarterPackClaimed = saved.StarterPackClaimed == true,
+		-- True once the Luxury Oven has been bought from the Shop.
+		LuxuryOven = saved.LuxuryOven == true,
 		LastSeen = cleanCount(saved.LastSeen),
 		DailyDay = cleanCount(saved.DailyDay),
 		DailyStreak = math.min(cleanCount(saved.DailyStreak), #Config.DailyRewards),
