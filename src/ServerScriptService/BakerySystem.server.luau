@@ -3,6 +3,7 @@
 -- Prompts are always Enabled here; the client shows them based on each prompt's
 -- Active attribute and the plot's OwnerId.
 local CollectionService = game:GetService("CollectionService")
+local PathfindingService = game:GetService("PathfindingService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -11,6 +12,7 @@ local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local ItemBuilder = require(ReplicatedStorage:WaitForChild("ItemBuilder"))
+local Layout = require(ReplicatedStorage:WaitForChild("Layout"))
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 local PurchaseHandler = require(ServerScriptService:WaitForChild("PurchaseHandler"))
 
@@ -21,6 +23,8 @@ local GROCERY_REACH = 20
 local FIRST_CRATE_DELAY = 15
 local SLOT_ITEM_SCALE = 0.5
 local TRAY_ITEM_SCALE = 0.6
+-- How high a customer's root part sits above the floor.
+local CUSTOMER_HEIGHT = 3.1
 local CUSTOMER_COLORS = {
 	Color3.fromRGB(255, 170, 165),
 	Color3.fromRGB(165, 200, 255),
@@ -179,8 +183,18 @@ end
 
 local function placedCount(data, itemId)
 	local count = 0
-	for _, placedId in data.Placed do
-		if placedId == itemId then
+	for _, entry in data.Placed do
+		if entry.Id == itemId then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function placedCaseCount(data)
+	local count = 0
+	for _, entry in data.Placed do
+		if Config.GetItem(entry.Id).Slots then
 			count += 1
 		end
 	end
@@ -189,8 +203,8 @@ end
 
 local function totalCharm(data)
 	local charm = 0
-	for _, itemId in data.Placed do
-		charm += Config.GetItem(itemId).Charm
+	for _, entry in data.Placed do
+		charm += Config.GetItem(entry.Id).Charm
 	end
 	return charm
 end
@@ -244,7 +258,7 @@ local function updateGuide(player)
 			target = case.model.Name
 		else
 			hint = "Your cases are full! Pack a delivery or wait for customers"
-			target = "PackingTable"
+			target = "PackingStation"
 		end
 	elseif plot.ovenState == "baking" then
 		hint = ("Baking %s..."):format(plot.bakeRecipe.Name:lower())
@@ -379,6 +393,87 @@ local function refreshHotbar(player, data)
 	return bar
 end
 
+-- Stations: the oven, cookbook counter, pantry shelf, checkout counter and packing
+-- table. Each one remembers where its parts sit around its centre, so it can move to
+-- any grid entry and back to its default spot.
+local function floorPoint(plot, point, height)
+	return (plot.floorTop * CFrame.new(point.X, height, point.Z)).Position
+end
+
+local function setUpStation(plot, station)
+	local root = plot.model[station.Path]
+	local parts = root:GetDescendants()
+	table.insert(parts, root)
+	local minX, maxX, minZ, maxZ = math.huge, -math.huge, math.huge, -math.huge
+	for _, part in parts do
+		if part:IsA("BasePart") and part.Transparency < 1 then
+			local half = part.Size / 2
+			for _, corner in { Vector3.new(1, 0, 1), Vector3.new(1, 0, -1), Vector3.new(-1, 0, 1), Vector3.new(-1, 0, -1) } do
+				for _, y in { -1, 1 } do
+					local point = plot.floorTop:PointToObjectSpace(part.CFrame * (half * (corner + Vector3.new(0, y, 0))))
+					minX, maxX = math.min(minX, point.X), math.max(maxX, point.X)
+					minZ, maxZ = math.min(minZ, point.Z), math.max(maxZ, point.Z)
+				end
+			end
+		end
+	end
+	root:SetAttribute("FootW", Layout.Cells(maxX - minX))
+	root:SetAttribute("FootD", Layout.Cells(maxZ - minZ))
+	local shape = Layout.StationShape(station, root)
+	local center = Vector3.new((minX + maxX) / 2, 0, (minZ + maxZ) / 2)
+	local origin = plot.floorTop * CFrame.new(center)
+	local offsets = {}
+	for _, part in parts do
+		if part:IsA("BasePart") then
+			offsets[part] = origin:ToObjectSpace(part.CFrame)
+		end
+	end
+	plot.stations[station.Id] = { offsets = offsets, shape = shape, default = Layout.EntryAt(shape, center, 0) }
+	plot.stationShapes[station.Id] = shape
+end
+
+local function stationEntry(plot, data, id)
+	return data and data.Stations[id] or plot.stations[id].default
+end
+
+local function stationThing(plot, data, id)
+	return Layout.StationThing(Layout.GetStation(id), plot.stations[id].shape, stationEntry(plot, data, id))
+end
+
+local function moveStation(plot, id, entry)
+	local station = plot.stations[id]
+	local origin = Layout.CFrame(plot.floorTop, station.shape, entry)
+	for part, offset in station.offsets do
+		part.CFrame = origin * offset
+	end
+end
+
+-- Puts every station where the owner left it, or at its default spot when data is nil.
+-- A saved spot that no longer fits inside the walls goes back to the default.
+local function placeStations(plot, data)
+	for id, station in plot.stations do
+		if data and data.Stations[id] then
+			local rect = Layout.Rect(station.shape, data.Stations[id])
+			if rect.MaxX > Layout.MaxX or rect.MaxZ > Layout.MaxZ then
+				data.Stations[id] = nil
+			end
+		end
+		moveStation(plot, id, stationEntry(plot, data, id))
+	end
+end
+
+local function stationEntries(plot, data)
+	local entries = {}
+	for id in plot.stations do
+		entries[id] = stationEntry(plot, data, id)
+	end
+	return entries
+end
+
+local function layoutThings(plot, data)
+	return Layout.AllThings(data.Placed, stationEntries(plot, data), plot.stationShapes)
+end
+
 local function syncStats(player)
 	local data = PlayerData.Get(player)
 	if not data then
@@ -423,6 +518,7 @@ local function syncStats(player)
 		Goals = data.Goals.List,
 		Owned = data.Owned,
 		Placed = data.Placed,
+		Stations = plot and stationEntries(plot, data) or {},
 		Charm = totalCharm(data),
 		Orders = orders,
 		CanAfford = canAffordUpgrade(data),
@@ -1367,25 +1463,39 @@ end
 local HELPER_APRON = Color3.fromRGB(255, 255, 255)
 local HELPERS = { "Baker", "Stocker" }
 
--- Baker stands beside the oven and Stocker beside the starter case, on the room side.
-local function helperSpot(plot, id)
-	local target = id == "Baker" and plot.ovenPrompt.Parent or plot.model.DisplayCase.Base
-	local floor = plot.model.Floor
-	local inward = ((floor.Position - target.Position) * Vector3.new(1, 0, 1)).Unit
-	local side = inward:Cross(Vector3.yAxis)
-	local position = target.Position + inward * 3 + side * 4
-	position = Vector3.new(position.X, floor.Position.Y + floor.Size.Y / 2 + 3, position.Z)
-	return CFrame.lookAt(position, position + inward)
+-- The Baker stands at the oven's front corner and the Stocker at a display case's, both
+-- facing it. They follow when those pieces move.
+local function helperSpot(plot, data, id)
+	local caseKey = plot.cases[Config.StarterCase.Key] and Config.StarterCase.Key or next(plot.cases)
+	local thing
+	if id == "Stocker" and caseKey then
+		thing = Layout.ItemThing(caseKey, data.Placed[caseKey])
+	else
+		thing = stationThing(plot, data, "Oven")
+	end
+	local rect = thing.Rect
+	local size = Vector3.new(rect.MaxX - rect.MinX, 0, rect.MaxZ - rect.MinZ)
+	local side = Vector3.new(thing.Facing.Z, 0, -thing.Facing.X)
+	local center = Layout.Center(rect)
+	local spot = center
+		+ thing.Facing * (math.abs(size:Dot(thing.Facing)) / 2 + 1.5)
+		+ side * (math.abs(size:Dot(side)) / 2 + 1.5)
+	local position = floorPoint(plot, spot, 3)
+	return CFrame.lookAt(position, floorPoint(plot, center, 3))
 end
 
 refreshHelpers = function(plot, data)
 	for _, id in HELPERS do
 		local hired = upgradeLevel(data, id).Delay ~= nil
-		if hired and not plot.helpersFolder:FindFirstChild(id) then
-			local model, label = buildPerson(id, HELPER_APRON, SKIN_COLORS[math.random(#SKIN_COLORS)])
+		local model = plot.helpersFolder:FindFirstChild(id)
+		if hired and not model then
+			local label
+			model, label = buildPerson(id, HELPER_APRON, SKIN_COLORS[math.random(#SKIN_COLORS)])
 			say(label, id)
-			model:PivotTo(helperSpot(plot, id))
 			model.Parent = plot.helpersFolder
+		end
+		if model then
+			model:PivotTo(helperSpot(plot, data, id))
 		end
 	end
 end
@@ -1459,21 +1569,9 @@ local function claimPlot(player)
 			setActive(plot.cookbookPrompt, true)
 			setActive(plot.pantryPrompt, true)
 			setActive(plot.packingPrompt, true)
-			local baseCFrame = plot.model.DisplayCase.Base.CFrame
-			addCase(
-				plot,
-				Config.StarterCaseKey,
-				plot.model.DisplayCase,
-				baseCFrame,
-				Config.StarterCaseSlots,
-				plot.model.DisplayCase.Base,
-				plot.customerCounter.Position + Vector3.new(0, 3, 0)
-			)
-			refreshCase(plot, data, Config.StarterCaseKey)
-			for spot = 1, Config.SpotCount do
-				if data.Placed[tostring(spot)] then
-					buildPlaced(plot, data, spot)
-				end
+			placeStations(plot, data)
+			for key in data.Placed do
+				buildPlaced(plot, data, key)
 			end
 			for slot = 1, #Config.DeliveryTiers do
 				fillOrder(plot, data, slot)
@@ -1515,6 +1613,7 @@ local function releasePlot(player)
 	plot.placedFolder:ClearAllChildren()
 	plot.customersFolder:ClearAllChildren()
 	plot.helpersFolder:ClearAllChildren()
+	placeStations(plot, nil)
 	removeCrate(plot)
 end
 
@@ -1762,16 +1861,16 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		cookbookPrompt = model.UpgradeStation.Prompt,
 		pantryPrompt = model.PantryShelf.Back.Prompt,
 		pantrySlots = model.PantryShelf.Slots,
-		packingTable = model.PackingTable,
-		packingPrompt = model.PackingTable.Prompt,
-		hatch = model.Hatch,
+		packingTable = model.PackingStation.PackingTable,
+		packingBelt = model.PackingStation.PackingBelt,
+		packingPrompt = model.PackingStation.PackingTable.Prompt,
 		signLabel = model.Sign.SignGui.Label,
-		pads = model.DecorSpots,
 		placedFolder = model.Placed,
+		floorTop = floor.CFrame * CFrame.new(0, floor.Size.Y / 2, 0),
+		stations = {},
+		stationShapes = {},
 		playerSpawn = model.Spots.PlayerSpawn,
 		customerStart = model.Spots.CustomerStart,
-		customerCounter = model.Spots.CustomerCounter,
-		counterRight = floor.CFrame.RightVector,
 		door = floor.CFrame * CFrame.new(0, 0.6, 19),
 		customersFolder = model.Customers,
 		helpersFolder = helpersFolder,
@@ -1783,11 +1882,14 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 	for slot in Config.DeliveryTiers do
 		plot.orderTokens[slot] = 0
 	end
+	for _, station in Layout.Stations do
+		setUpStation(plot, station)
+	end
+	placeStations(plot, nil)
 	setActive(plot.ovenPrompt, false)
 	setActive(plot.cookbookPrompt, false)
 	setActive(plot.pantryPrompt, false)
 	setActive(plot.packingPrompt, false)
-	setActive(model.DisplayCase.Base.Prompt, false)
 	plot.ovenPrompt.Triggered:Connect(function(player)
 		onOvenPrompt(plot, player)
 	end)
