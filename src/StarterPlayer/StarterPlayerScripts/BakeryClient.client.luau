@@ -807,6 +807,8 @@ local DOORWAY_COLOR = Color3.fromRGB(255, 200, 120)
 local GHOST_TRANSPARENCY = 0.45
 local ARROW_ANGLE = math.rad(35)
 local MOVE_HINT = "Tap or click anything in your bakery to move it"
+local ROTATE_HINT = "Pick something up first, then rotate it"
+local BANNER_HINT_TIME = 2
 -- Copies of a station keep their parts but none of their prompts, labels or effects.
 local GHOST_REMOVES = { "ProximityPrompt", "BillboardGui", "ParticleEmitter", "Sparkles", "Sound", "ClickDetector" }
 
@@ -815,6 +817,7 @@ local held = nil
 local pending = nil
 local grid = nil
 local hiddenGuis = {}
+local bannerHintUntil = 0
 
 local placeBanner = label("PlaceBanner", UDim2.new(0.5, 0, 0, 32), UDim2.new(0.5, 0, 0, 78), TOP_CENTER, GREEN, WHITE)
 placeBanner.Visible = false
@@ -1027,10 +1030,12 @@ local function refreshHeld()
 	placeButton.BackgroundColor3 = ok and GREEN or GREY
 end
 
+-- Rotate always shows while decorating so players know it's there. It's grey until
+-- something is picked up.
 local function refreshBar()
 	placeBanner.Visible = decorating
 	placeBar.Visible = decorating
-	rotateButton.Visible = held ~= nil
+	rotateButton.BackgroundColor3 = held and BLUE or GREY
 	placeButton.Visible = held ~= nil
 	putAwayButton.Visible = held ~= nil and held.key ~= nil and held.stationId == nil
 	cancelButton.Visible = held ~= nil
@@ -1232,6 +1237,9 @@ local function rotateHeld()
 	if held then
 		held.entry = Layout.Rotated(held.shape, held.entry)
 		refreshHeld()
+	elseif decorating then
+		placeBanner.Text = ROTATE_HINT
+		bannerHintUntil = os.clock() + BANNER_HINT_TIME
 	end
 end
 
@@ -1292,7 +1300,9 @@ RunService.RenderStepped:Connect(function()
 	else
 		local thing = pieceOnRay(plot, ray)
 		hoverHighlight.Adornee = thing and pieceInstance(plot, thing.Key)
-		placeBanner.Text = thing and ("Click to move the " .. thing.Name:lower()) or MOVE_HINT
+		if os.clock() >= bannerHintUntil then
+			placeBanner.Text = thing and ("Click to move the " .. thing.Name:lower()) or MOVE_HINT
+		end
 	end
 end)
 
