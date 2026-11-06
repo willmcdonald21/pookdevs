@@ -404,7 +404,7 @@ local function setUpStation(plot, station)
 	local root = plot.model[station.Path]
 	local parts = root:GetDescendants()
 	table.insert(parts, root)
-	local minX, maxX, minZ, maxZ = math.huge, -math.huge, math.huge, -math.huge
+	local minX, maxX, minZ, maxZ, top = math.huge, -math.huge, math.huge, -math.huge, 0
 	for _, part in parts do
 		if part:IsA("BasePart") and part.Transparency < 1 then
 			local half = part.Size / 2
@@ -413,12 +413,14 @@ local function setUpStation(plot, station)
 					local point = plot.floorTop:PointToObjectSpace(part.CFrame * (half * (corner + Vector3.new(0, y, 0))))
 					minX, maxX = math.min(minX, point.X), math.max(maxX, point.X)
 					minZ, maxZ = math.min(minZ, point.Z), math.max(maxZ, point.Z)
+					top = math.max(top, point.Y)
 				end
 			end
 		end
 	end
 	root:SetAttribute("FootW", Layout.Cells(maxX - minX))
 	root:SetAttribute("FootD", Layout.Cells(maxZ - minZ))
+	root:SetAttribute("FootH", top)
 	local shape = Layout.StationShape(station, root)
 	local center = Vector3.new((minX + maxX) / 2, 0, (minZ + maxZ) / 2)
 	local origin = plot.floorTop * CFrame.new(center)
