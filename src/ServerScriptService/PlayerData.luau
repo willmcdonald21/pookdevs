@@ -86,20 +86,38 @@ local function cleanGoals(saved)
 	return goals
 end
 
+-- Paint Ids by target Id. A colour the target can't use is dropped, so it shows its
+-- original colour.
+local function cleanPaint(saved)
+	local paint = {}
+	if type(saved) == "table" then
+		for _, target in Config.PaintTargets do
+			local chosen = Config.GetPaint(saved[target.Id])
+			if chosen and Config.CanPaint(target, chosen) then
+				paint[target.Id] = chosen.Id
+			end
+		end
+	end
+	return paint
+end
+
 -- Keeps placed items that are owned and inside the walls, and moved stations. Wall items
 -- keep their height and must still be on a wall. Overlaps were checked when each piece
 -- was placed.
 local function cleanLayout(data, savedPlaced, savedStock, savedStations)
+	local bounds = Layout.Bounds(data.Expansion)
 	local placedCounts = {}
 	for key, saved in savedPlaced do
 		local item = type(key) == "string" and type(saved) == "table" and Config.GetItem(saved.Id)
 		local entry = item and Layout.CleanEntry(saved.X, saved.Z, saved.R, item.Wall and saved.Y or nil)
 		if entry and (placedCounts[item.Id] or 0) < data.Owned[item.Id] then
 			entry.Id = item.Id
-			local rect = Layout.Rect(Layout.ItemShape(item), entry)
-			local fits = rect.MaxX <= Layout.MaxX and rect.MaxZ <= Layout.MaxZ
+			-- A display case keeps the colour it was painted.
+			local paint = item.Slots and Config.GetPaint(saved.Paint)
+			entry.Paint = paint and paint.Id or nil
+			local fits = Layout.Inside(Layout.Rect(Layout.ItemShape(item), entry), bounds)
 			if item.Wall then
-				fits = entry.Y ~= nil and Layout.OnWall(Layout.ItemThing(key, entry))
+				fits = entry.Y ~= nil and Layout.OnWall(Layout.ItemThing(key, entry), bounds)
 			end
 			if fits then
 				placedCounts[item.Id] = (placedCounts[item.Id] or 0) + 1
@@ -158,8 +176,11 @@ local function clean(saved)
 		Receipts = {},
 		BoostUntil = cleanCount(saved.BoostUntil),
 		StarterPackClaimed = saved.StarterPackClaimed == true,
-		-- True once the Luxury Oven has been bought from the Shop.
+		-- True once the Luxury Oven has been bought.
 		LuxuryOven = saved.LuxuryOven == true,
+		-- How many times the bakery has been made bigger. 0 is the starting size.
+		Expansion = math.clamp(math.floor(tonumber(saved.Expansion) or 0), 0, #Config.Expansions),
+		Paint = cleanPaint(saved.Paint),
 		LastSeen = cleanCount(saved.LastSeen),
 		DailyDay = cleanCount(saved.DailyDay),
 		DailyStreak = math.min(cleanCount(saved.DailyStreak), #Config.DailyRewards),
