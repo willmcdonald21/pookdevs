@@ -293,7 +293,7 @@ function Config.GetUpgrade(id)
 end
 
 -- Placeable items. Costs are in Coins or Stars. Part positions are relative to the
--- floor at the item's spot. Display cases hold treats at their Slots.
+-- item's origin on the floor, and the front is -Z. Display cases hold treats at their Slots.
 -- An item with OnlyFor = { userId, ... } is a free gift for those accounts, and
 -- nobody else can see or get it. An item with Pass = "<pass Id>" comes with that
 -- game pass, and everyone can see it in the Decorate menu.
@@ -633,18 +633,11 @@ end
 
 Config.StarterPack = { Coins = 1000, Stars = 15 }
 
-Config.SpotCount = 16
 -- Each box holds one kind of treat, so keep this at or above the number of recipes.
 Config.HotbarSize = 5
-Config.StarterCaseKey = "starter"
-Config.StarterCaseSlots = {
-	Vector3.new(-3.5, 0.35, 0),
-	Vector3.new(-2.1, 0.35, 0),
-	Vector3.new(-0.7, 0.35, 0),
-	Vector3.new(0.7, 0.35, 0),
-	Vector3.new(2.1, 0.35, 0),
-	Vector3.new(3.5, 0.35, 0),
-}
+-- Every bakery gets one free display case, placed here to start with (a Layout grid
+-- entry). The last case can't be stored, so customers always have something to visit.
+Config.StarterCase = { Key = "starter", Item = "SmallCase", X = 36, Z = 27, R = 0 }
 
 -- Delivery board: one order per tier at a time. Pay is the treats' sale price times PayScale.
 Config.DeliveryTiers = {
