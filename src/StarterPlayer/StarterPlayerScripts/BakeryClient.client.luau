@@ -2026,10 +2026,13 @@ local function watchCustomer(model)
 	root.ChildAdded:Connect(addJoint)
 end
 
-for _, model in CollectionService:GetTagged("Customer") do
-	task.spawn(watchCustomer, model)
+-- Helpers walk around the bakery too, so their limbs swing the same way.
+for _, tag in { "Customer", "Helper" } do
+	for _, model in CollectionService:GetTagged(tag) do
+		task.spawn(watchCustomer, model)
+	end
+	CollectionService:GetInstanceAddedSignal(tag):Connect(watchCustomer)
 end
-CollectionService:GetInstanceAddedSignal("Customer"):Connect(watchCustomer)
 
 RunService.RenderStepped:Connect(function()
 	local now = os.clock()
