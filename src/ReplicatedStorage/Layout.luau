@@ -5,6 +5,9 @@
 -- with the lowest coordinates, and R is how many quarter turns it has been rotated.
 -- A wall piece's entry also has Y, the height of its bottom. Its cells are the strip along
 -- the wall it hangs on, and its R makes it face away from that wall.
+-- Cell 0, 0 is the back left corner of the starting bakery. A bigger bakery adds cells to
+-- the left and back, which have negative numbers, so saved spots never need to change.
+-- The rules take the bakery's bounds, its floor inside the walls, from Layout.Bounds.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
@@ -14,13 +17,28 @@ local Layout = {}
 -- Saves made before free placement have no version and are converted on load.
 Layout.Version = 2
 
--- The floor inside the walls, one cell per stud.
+-- The starting floor inside the walls, one cell per stud.
 Layout.MinX = -24
 Layout.MinZ = -19
 Layout.Columns = 48
 Layout.Rows = 38
 Layout.MaxX = Layout.MinX + Layout.Columns
 Layout.MaxZ = Layout.MinZ + Layout.Rows
+
+-- The floor inside the walls at an expansion level, where 0 is the starting size. Each
+-- step moves the back wall back and the side walls out. The front never moves.
+function Layout.Bounds(level)
+	local back, side = 0, 0
+	for index = 1, level do
+		back += Config.Expansions[index].Back
+		side += Config.Expansions[index].Side
+	end
+	return { MinX = Layout.MinX - side, MaxX = Layout.MaxX + side, MinZ = Layout.MinZ - back, MaxZ = Layout.MaxZ }
+end
+
+Layout.Start = Layout.Bounds(0)
+-- Saved and sent cells must fit in the biggest bakery.
+Layout.Largest = Layout.Bounds(#Config.Expansions)
 
 -- Just inside the door. Solid pieces can't go here, so customers can always get in.
 Layout.Entrance = { MinX = -7, MaxX = 7, MinZ = 15, MaxZ = 19 }
@@ -163,46 +181,48 @@ end
 
 -- The entry that puts the piece's centre as near as the grid allows to a floor point,
 -- kept inside the walls.
-function Layout.EntryAt(shape, point, r)
+function Layout.EntryAt(shape, point, r, bounds)
+	bounds = bounds or Layout.Start
 	local w, d = turnedSize(shape, r)
 	return {
-		X = math.clamp(math.round(point.X - w / 2 - Layout.MinX), 0, Layout.Columns - w),
-		Z = math.clamp(math.round(point.Z - d / 2 - Layout.MinZ), 0, Layout.Rows - d),
+		X = math.clamp(math.round(point.X - w / 2), bounds.MinX, bounds.MaxX - w) - Layout.MinX,
+		Z = math.clamp(math.round(point.Z - d / 2), bounds.MinZ, bounds.MaxZ - d) - Layout.MinZ,
 		R = r,
 	}
 end
 
 -- One quarter turn, keeping the piece where it was.
-function Layout.Rotated(shape, entry)
-	return Layout.EntryAt(shape, Layout.Center(Layout.Rect(shape, entry)), (entry.R + 1) % 4)
+function Layout.Rotated(shape, entry, bounds)
+	return Layout.EntryAt(shape, Layout.Center(Layout.Rect(shape, entry)), (entry.R + 1) % 4, bounds)
 end
 
 -- The wall entry that puts a wall piece's centre as near as it can to a point, on the
 -- nearest of the back (R 0), right (R 1) and left (R 3) walls. point is in floor space,
 -- with Y the height above the floor.
-function Layout.WallEntryAt(shape, point)
-	local toBack, toLeft, toRight = point.Z - Layout.MinZ, point.X - Layout.MinX, Layout.MaxX - point.X
+function Layout.WallEntryAt(shape, point, bounds)
+	bounds = bounds or Layout.Start
+	local toBack, toLeft, toRight = point.Z - bounds.MinZ, point.X - bounds.MinX, bounds.MaxX - point.X
 	local r = 3
 	if toBack <= toLeft and toBack <= toRight then
 		r = 0
 	elseif toRight <= toLeft then
 		r = 1
 	end
-	local entry = Layout.EntryAt(shape, point, r)
+	local entry = Layout.EntryAt(shape, point, r, bounds)
 	if r == 0 then
-		entry.Z = 0
+		entry.Z = bounds.MinZ - Layout.MinZ
 	elseif r == 1 then
-		entry.X = Layout.Columns - shape.D
+		entry.X = bounds.MaxX - shape.D - Layout.MinX
 	else
-		entry.X = 0
+		entry.X = bounds.MinX - Layout.MinX
 	end
 	local highest = math.max(0, math.floor(Layout.WallHeight - shape.H))
 	entry.Y = math.clamp(math.round(point.Y - shape.H / 2), 0, highest)
 	return entry
 end
 
--- Turns saved or sent values into an entry, or nil when they aren't whole numbers in range.
--- y is only given for wall pieces.
+-- Turns saved or sent values into an entry, or nil when they aren't whole numbers inside
+-- the biggest bakery. y is only given for wall pieces.
 function Layout.CleanEntry(x, z, r, y)
 	if type(x) ~= "number" or type(z) ~= "number" or type(r) ~= "number" then
 		return nil
@@ -210,7 +230,10 @@ function Layout.CleanEntry(x, z, r, y)
 	if x % 1 ~= 0 or z % 1 ~= 0 or r % 1 ~= 0 then
 		return nil
 	end
-	if x < 0 or x >= Layout.Columns or z < 0 or z >= Layout.Rows or r < 0 or r > 3 then
+	local largest = Layout.Largest
+	local inX = x >= largest.MinX - Layout.MinX and x < largest.MaxX - Layout.MinX
+	local inZ = z >= largest.MinZ - Layout.MinZ and z < largest.MaxZ - Layout.MinZ
+	if not inX or not inZ or r < 0 or r > 3 then
 		return nil
 	end
 	if y ~= nil and (type(y) ~= "number" or y % 1 ~= 0 or y < 0 or y >= Layout.WallHeight) then
@@ -264,8 +287,8 @@ local function overlaps(a, b)
 	return a.MinX < b.MaxX and b.MinX < a.MaxX and a.MinZ < b.MaxZ and b.MinZ < a.MaxZ
 end
 
-local function inside(rect)
-	return rect.MinX >= Layout.MinX and rect.MaxX <= Layout.MaxX and rect.MinZ >= Layout.MinZ and rect.MaxZ <= Layout.MaxZ
+function Layout.Inside(rect, bounds)
+	return rect.MinX >= bounds.MinX and rect.MaxX <= bounds.MaxX and rect.MinZ >= bounds.MinZ and rect.MaxZ <= bounds.MaxZ
 end
 
 local function overlapsHeight(a, b)
@@ -274,12 +297,16 @@ end
 
 -- True when a wall piece is inside the bakery, against the wall it faces away from, and
 -- below the trim.
-function Layout.OnWall(thing)
+function Layout.OnWall(thing, bounds)
+	bounds = bounds or Layout.Start
 	local rect, facing = thing.Rect, thing.Facing
-	local against = (facing.Z > 0 and rect.MinZ == Layout.MinZ)
-		or (facing.X < 0 and rect.MaxX == Layout.MaxX)
-		or (facing.X > 0 and rect.MinX == Layout.MinX)
-	return against and inside(rect) and thing.Bottom >= 0 and thing.Bottom + thing.Height <= Layout.WallHeight
+	local against = (facing.Z > 0 and rect.MinZ == bounds.MinZ)
+		or (facing.X < 0 and rect.MaxX == bounds.MaxX)
+		or (facing.X > 0 and rect.MinX == bounds.MinX)
+	return against
+		and Layout.Inside(rect, bounds)
+		and thing.Bottom >= 0
+		and thing.Bottom + thing.Height <= Layout.WallHeight
 end
 
 local function roomInFront(name)
@@ -299,14 +326,15 @@ end
 -- Rugs only clash with other rugs, so they can go under furniture and in the doorway.
 -- Solid pieces clash where their cells and their heights overlap, so a wall piece can
 -- hang above furniture. Wall pieces are up out of the way of the doorway and customers.
-function Layout.Check(thing, others)
-	if not inside(thing.Rect) then
+function Layout.Check(thing, others, bounds)
+	bounds = bounds or Layout.Start
+	if not Layout.Inside(thing.Rect, bounds) then
 		return false, "Keep it inside your bakery"
 	end
-	if thing.Wall and not Layout.OnWall(thing) then
+	if thing.Wall and not Layout.OnWall(thing, bounds) then
 		return false, "Hang it on the back or side walls"
 	end
-	if thing.Front and not inside(thing.Front) then
+	if thing.Front and not Layout.Inside(thing.Front, bounds) then
 		return false, roomInFront(thing.Name)
 	end
 	if not thing.Flat and not thing.Wall and overlaps(thing.Rect, Layout.Entrance) then
