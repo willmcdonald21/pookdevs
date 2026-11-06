@@ -4,6 +4,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
+local Layout = require(ReplicatedStorage:WaitForChild("Layout"))
 
 local RETRIES = 3
 local RETRY_DELAY = 1
@@ -85,6 +86,55 @@ local function cleanGoals(saved)
 	return goals
 end
 
+-- Keeps placed items that are owned and inside the walls, and moved stations. Overlaps
+-- were checked when each piece was placed.
+local function cleanLayout(data, savedPlaced, savedStock, savedStations)
+	local placedCounts = {}
+	for key, saved in savedPlaced do
+		local item = type(key) == "string" and type(saved) == "table" and Config.GetItem(saved.Id)
+		local entry = item and Layout.CleanEntry(saved.X, saved.Z, saved.R)
+		if entry and (placedCounts[item.Id] or 0) < data.Owned[item.Id] then
+			entry.Id = item.Id
+			local rect = Layout.Rect(Layout.ItemShape(item), entry)
+			if rect.MaxX <= Layout.MaxX and rect.MaxZ <= Layout.MaxZ then
+				placedCounts[item.Id] = (placedCounts[item.Id] or 0) + 1
+				data.Placed[key] = entry
+				if item.Slots then
+					data.Stock[key] = cleanStock(savedStock[key], #item.Slots)
+				end
+			end
+		end
+	end
+	if type(savedStations) == "table" then
+		for _, station in Layout.Stations do
+			local saved = savedStations[station.Id]
+			local entry = type(saved) == "table" and Layout.CleanEntry(saved.X, saved.Z, saved.R)
+			if entry then
+				data.Stations[station.Id] = entry
+			end
+		end
+	end
+end
+
+-- Saves from before free placement had items on 16 fixed squares and a case on the
+-- counter. Those items go back into storage with their treats returned to the tray, and
+-- the counter case becomes a free floor case that keeps its treats. New saves get the
+-- free case this way too.
+local function convertLayout(data, savedStock)
+	for key, stock in savedStock do
+		if key ~= Config.StarterCase.Key and type(stock) == "table" then
+			for _, recipeIndex in cleanStock(stock, math.huge) do
+				data.Tray[recipeIndex] += 1
+			end
+		end
+	end
+	local starter = Config.StarterCase
+	local item = Config.GetItem(starter.Item)
+	data.Owned[item.Id] += 1
+	data.Placed[starter.Key] = { Id = item.Id, X = starter.X, Z = starter.Z, R = starter.R }
+	data.Stock[starter.Key] = cleanStock(savedStock[starter.Key], #item.Slots)
+end
+
 -- Tables with holes don't survive saving, so Placed and Stock use string keys.
 local function clean(saved)
 	saved = type(saved) == "table" and saved or {}
@@ -97,6 +147,9 @@ local function clean(saved)
 		Owned = {},
 		Placed = {},
 		Stock = {},
+		-- Only stations the player has moved. The rest stay at their default spots.
+		Stations = {},
+		LayoutVersion = Layout.Version,
 		Receipts = {},
 		BoostUntil = cleanCount(saved.BoostUntil),
 		StarterPackClaimed = saved.StarterPackClaimed == true,
@@ -127,21 +180,13 @@ local function clean(saved)
 		data.Owned[item.Id] = cleanCount(savedOwned[item.Id])
 	end
 
-	local placedCounts = {}
 	local savedPlaced = type(saved.Placed) == "table" and saved.Placed or {}
 	local savedStock = type(saved.Stock) == "table" and saved.Stock or {}
-	for spot = 1, Config.SpotCount do
-		local key = tostring(spot)
-		local item = Config.GetItem(savedPlaced[key])
-		if item and (placedCounts[item.Id] or 0) < data.Owned[item.Id] then
-			placedCounts[item.Id] = (placedCounts[item.Id] or 0) + 1
-			data.Placed[key] = item.Id
-			if item.Slots then
-				data.Stock[key] = cleanStock(savedStock[key], #item.Slots)
-			end
-		end
+	if saved.LayoutVersion == Layout.Version then
+		cleanLayout(data, savedPlaced, savedStock, saved.Stations)
+	else
+		convertLayout(data, savedStock)
 	end
-	data.Stock[Config.StarterCaseKey] = cleanStock(savedStock[Config.StarterCaseKey], #Config.StarterCaseSlots)
 
 	-- New saves start with a stocked pantry. Counts never go above the pantry's capacity.
 	data.Pantry = {}
