@@ -1632,14 +1632,15 @@ local function buildCustomer(golden)
 	return model, label
 end
 
-local function walkCustomer(model, to)
+-- Customers walk at CustomerSpeed. Helpers pass their own speed.
+local function walkCustomer(model, to, speed)
 	local root = model.PrimaryPart
 	local from = root.Position
 	local distance = (to - from).Magnitude
 	if distance < 0.1 then
 		return
 	end
-	local duration = distance / Config.CustomerSpeed
+	local duration = distance / (speed or Config.CustomerSpeed)
 	root.CFrame = CFrame.lookAt(from, to)
 	model:SetAttribute("Walking", true)
 	local tween = TweenService:Create(root, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
@@ -1655,7 +1656,7 @@ local PATH_SETTINGS = { AgentRadius = 1.2, AgentHeight = 5, AgentCanJump = false
 local PATH_GROUND = Vector3.new(0, CUSTOMER_HEIGHT - 0.5, 0)
 
 -- Walks around furniture inside the bakery. If there's no way through, walks straight.
-local function walkAround(model, to)
+local function walkAround(model, to, speed)
 	local path = PathfindingService:CreatePath(PATH_SETTINGS)
 	local ok = pcall(function()
 		path:ComputeAsync(model.PrimaryPart.Position - PATH_GROUND, to - PATH_GROUND)
@@ -1667,11 +1668,11 @@ local function walkAround(model, to)
 				return
 			end
 			local point = waypoints[index].Position
-			walkCustomer(model, Vector3.new(point.X, to.Y, point.Z))
+			walkCustomer(model, Vector3.new(point.X, to.Y, point.Z), speed)
 		end
 	end
 	if model.Parent then
-		walkCustomer(model, to)
+		walkCustomer(model, to, speed)
 	end
 end
 
@@ -1810,91 +1811,235 @@ local function runCustomerSpawner(plot, session, player)
 	end
 end
 
--- Helpers
+-- Helpers. They walk to do their jobs: the Baker from the pantry shelf to an empty oven,
+-- and the Stocker from a finished oven to the display cases. Between jobs they wait at the
+-- regular oven, the Baker at one front corner and the Stocker at the other.
 local HELPER_APRON = Color3.fromRGB(255, 255, 255)
 local HELPERS = { "Baker", "Stocker" }
+local HELPER_SIDES = { Baker = 1, Stocker = -1 }
 
--- The Baker stands at the oven's front corner and the Stocker at a display case's, both
--- facing it. They follow when those pieces move.
-local function helperSpot(plot, data, id)
-	local caseKey = plot.cases[Config.StarterCase.Key] and Config.StarterCase.Key or next(plot.cases)
-	local thing
-	if id == "Stocker" and caseKey then
-		thing = Layout.ItemThing(caseKey, data.Placed[caseKey])
-	else
-		thing = stationThing(plot, data, "Oven")
-	end
+-- A spot in front of a piece, facing it. side -1 and 1 are its front corners, and 0 is
+-- the middle of its front.
+local function spotBy(plot, thing, side)
 	local rect = thing.Rect
 	local size = Vector3.new(rect.MaxX - rect.MinX, 0, rect.MaxZ - rect.MinZ)
-	local side = Vector3.new(thing.Facing.Z, 0, -thing.Facing.X)
+	local across = Vector3.new(thing.Facing.Z, 0, -thing.Facing.X)
 	local center = Layout.Center(rect)
 	local spot = center
 		+ thing.Facing * (math.abs(size:Dot(thing.Facing)) / 2 + 1.5)
-		+ side * (math.abs(size:Dot(side)) / 2 + 1.5)
-	local position = floorPoint(plot, spot, 3)
-	return CFrame.lookAt(position, floorPoint(plot, center, 3))
+		+ across * side * (math.abs(size:Dot(across)) / 2 + 1.5)
+	local position = floorPoint(plot, spot, CUSTOMER_HEIGHT)
+	return CFrame.lookAt(position, floorPoint(plot, center, CUSTOMER_HEIGHT))
 end
 
+-- "donuts", or "donut" for one. Every treat's name takes an "s".
+local function treatWord(recipe, count)
+	return recipe.Name:lower() .. (count == 1 and "" or "s")
+end
+
+-- Where a helper stands to use an oven, which is also where they wait at the regular oven.
+local function ovenSpot(plot, data, id, ovenId)
+	return spotBy(plot, stationThing(plot, data, ovenId or "Oven"), HELPER_SIDES[id])
+end
+
+-- Hired helpers appear at the oven. After that they walk wherever their work takes them.
 refreshHelpers = function(plot, data)
 	for _, id in HELPERS do
-		local hired = upgradeLevel(data, id).Delay ~= nil
-		local model = plot.helpersFolder:FindFirstChild(id)
-		if hired and not model then
-			local label
-			model, label = buildPerson(id, HELPER_APRON, SKIN_COLORS[math.random(#SKIN_COLORS)])
+		if upgradeLevel(data, id).WalkSpeed and not plot.helpersFolder:FindFirstChild(id) then
+			local model, label = buildPerson(id, HELPER_APRON, SKIN_COLORS[math.random(#SKIN_COLORS)])
 			say(label, id)
+			model:PivotTo(ovenSpot(plot, data, id))
+			-- The client swings helpers' arms and legs while they walk, like customers'.
+			CollectionService:AddTag(model, "Helper")
 			model.Parent = plot.helpersFolder
 		end
-		if model then
-			model:PivotTo(helperSpot(plot, data, id))
-		end
 	end
 end
 
--- Moves a finished batch straight from an oven into cases with room.
-local function stockFromOven(plot, oven, data)
-	local recipeIndex = table.find(Config.Recipes, oven.recipe)
-	local changed = {}
-	for key, case in plot.cases do
-		local stock = data.Stock[key]
-		while oven.count > 0 and #stock < #case.slots do
-			table.insert(stock, recipeIndex)
-			oven.count -= 1
-			changed[key] = true
-		end
+-- Walks a helper somewhere and turns them to face the way the spot faces. Returns false
+-- when the owner has left on the way, so the helper's job ends.
+local function helperWalk(plot, session, model, spot, speed)
+	walkAround(model, spot.Position, speed)
+	if plot.session ~= session or not model.Parent then
+		return false
 	end
-	for key in changed do
-		refreshCase(plot, data, key)
-	end
-	return next(changed) ~= nil
+	model:PivotTo(spot)
+	return true
 end
 
--- The Stocker empties every ready oven and the Baker refills every empty one.
-local function runHelpers(plot, session, player)
+-- Sends a helper back to wait at the regular oven when they've wandered off, for example
+-- after a job or after the oven moved.
+local function helperGoHome(plot, session, model, data, id, speed)
+	local home = ovenSpot(plot, data, id)
+	if (model.PrimaryPart.Position - home.Position).Magnitude > 1 then
+		helperWalk(plot, session, model, home, speed)
+	end
+end
+
+local function firstOven(plot, data, state)
+	for _, oven in ownedOvens(plot, data) do
+		if oven.state == state and (state ~= "ready" or oven.count > 0) then
+			return oven
+		end
+	end
+	return nil
+end
+
+-- The Stocker holds the treats they're carrying on a tray, like the one you carry.
+local function setHelperTray(model, recipeIndex)
+	local old = model:FindFirstChild("CarriedTray")
+	if old then
+		old:Destroy()
+	end
+	if not recipeIndex then
+		return
+	end
+	local root = model.PrimaryPart
+	local tray = Instance.new("Part")
+	tray.Name = "CarriedTray"
+	tray.Size = Vector3.new(2.6, 0.25, 1.6)
+	tray.Color = Color3.fromRGB(240, 150, 175)
+	tray.CanCollide = false
+	tray.CanQuery = false
+	tray.CanTouch = false
+	tray.Massless = true
+	tray.CFrame = root.CFrame * CFrame.new(0, 0.2, -1.6)
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = root
+	weld.Part1 = tray
+	weld.Parent = tray
+	local treat = ItemBuilder.Build(Config.Recipes[recipeIndex], TRAY_ITEM_SCALE, tray.CFrame * CFrame.new(0, tray.Size.Y / 2 + 0.1, 0))
+	local treatWeld = Instance.new("WeldConstraint")
+	treatWeld.Part0 = tray
+	treatWeld.Part1 = treat.PrimaryPart
+	treatWeld.Parent = treat.PrimaryPart
+	treat.Parent = tray
+	tray.Parent = model
+end
+
+-- The Baker fetches ingredients from the pantry shelf, carries them to an empty oven, and
+-- bakes your last treat again once they're standing at it.
+local function runBaker(plot, session, player)
 	while plot.session == session do
 		task.wait(0.5)
 		local data = PlayerData.Get(player)
 		if plot.session ~= session or not data then
 			return
 		end
-		local stocker = upgradeLevel(data, "Stocker")
-		local baker = upgradeLevel(data, "Baker")
-		for _, oven in ownedOvens(plot, data) do
-			local waited = os.clock() - oven.changedAt
-			if oven.state == "ready" and stocker.Delay and waited >= stocker.Delay then
-				if stockFromOven(plot, oven, data) then
+		local speed = upgradeLevel(data, "Baker").WalkSpeed
+		local model = plot.helpersFolder:FindFirstChild("Baker")
+		if speed and model then
+			local label = model.PrimaryPart.Bubble.Label
+			local recipe = Config.Recipes[data.LastRecipe]
+			local oven = recipe and not missingIngredients(data, recipe) and firstOven(plot, data, "idle")
+			if oven then
+				say(label, "Getting ingredients")
+				if not helperWalk(plot, session, model, spotBy(plot, stationThing(plot, data, "Pantry"), 0), speed) then
+					return
+				end
+				task.wait(0.5)
+				say(label, "Baking " .. treatWord(recipe, 2))
+				if not helperWalk(plot, session, model, ovenSpot(plot, data, "Baker", oven.model.Name), speed) then
+					return
+				end
+				-- You may have used the oven or the ingredients while the Baker was walking.
+				recipe = Config.Recipes[data.LastRecipe]
+				if oven.state == "idle" and hasStation(data, oven.model.Name) and recipe and not missingIngredients(data, recipe) then
+					startBake(plot, oven, player, recipe)
+				end
+				say(label, "Baker")
+			else
+				helperGoHome(plot, session, model, data, "Baker", speed)
+			end
+		end
+	end
+end
+
+local function caseRoom(plot, data)
+	local room = 0
+	for key, case in plot.cases do
+		room += #case.slots - #data.Stock[key]
+	end
+	return room
+end
+
+-- The nearest display case with room left.
+local function caseWithRoom(plot, data, from)
+	local best, bestDistance = nil, math.huge
+	for key, case in plot.cases do
+		local distance = (case.stand - from).Magnitude
+		if #data.Stock[key] < #case.slots and distance < bestDistance then
+			best, bestDistance = key, distance
+		end
+	end
+	return best
+end
+
+-- The Stocker takes as much of a finished batch as the cases have room for, walks it to
+-- the cases one at a time, and puts each treat in when they get there. Treats they're
+-- still carrying when the cases fill up wait on their tray until there's room again.
+-- What they carry is lost if the owner leaves, like a batch left in an oven.
+local function runStocker(plot, session, player)
+	local carrying = nil
+	while plot.session == session do
+		task.wait(0.5)
+		local data = PlayerData.Get(player)
+		if plot.session ~= session or not data then
+			return
+		end
+		local speed = upgradeLevel(data, "Stocker").WalkSpeed
+		local model = plot.helpersFolder:FindFirstChild("Stocker")
+		if speed and model then
+			local label = model.PrimaryPart.Bubble.Label
+			local oven = not carrying and caseRoom(plot, data) > 0 and firstOven(plot, data, "ready")
+			if oven then
+				say(label, "Fetching treats")
+				if not helperWalk(plot, session, model, ovenSpot(plot, data, "Stocker", oven.model.Name), speed) then
+					return
+				end
+				-- You may have collected the batch while the Stocker was walking.
+				local take = oven.state == "ready" and math.min(oven.count, caseRoom(plot, data)) or 0
+				if take > 0 then
+					carrying = { Recipe = table.find(Config.Recipes, oven.recipe), Count = take }
+					oven.count -= take
 					if oven.count == 0 then
 						resetOven(oven)
 					else
 						oven.prompt.ActionText = ("Collect %d %s"):format(oven.count, oven.recipe.Name)
 					end
+					setHelperTray(model, carrying.Recipe)
 					syncStats(player)
 				end
-			elseif oven.state == "idle" and baker.Delay and waited >= baker.Delay then
-				local recipe = Config.Recipes[data.LastRecipe]
-				if recipe and not missingIngredients(data, recipe) then
-					startBake(plot, oven, player, recipe)
+			end
+			local key = carrying and caseWithRoom(plot, data, model.PrimaryPart.Position)
+			if key then
+				local recipe = Config.Recipes[carrying.Recipe]
+				say(label, ("Carrying %d %s"):format(carrying.Count, treatWord(recipe, carrying.Count)))
+				local target = plot.cases[key]
+				local facing = Vector3.new(target.origin.Position.X, target.stand.Y, target.origin.Position.Z)
+				if not helperWalk(plot, session, model, CFrame.lookAt(target.stand, facing), speed) then
+					return
 				end
+				-- The case may have been moved, stored or filled while the Stocker walked.
+				local case, stock = plot.cases[key], data.Stock[key]
+				if case and stock then
+					while carrying.Count > 0 and #stock < #case.slots do
+						table.insert(stock, carrying.Recipe)
+						carrying.Count -= 1
+					end
+					refreshCase(plot, data, key)
+					syncStats(player)
+				end
+				if carrying.Count == 0 then
+					carrying = nil
+					setHelperTray(model, nil)
+					say(label, "Stocker")
+				end
+			elseif not oven then
+				if carrying then
+					say(label, "Cases are full!")
+				end
+				helperGoHome(plot, session, model, data, "Stocker", speed)
 			end
 		end
 	end
@@ -1937,7 +2082,8 @@ local function claimPlot(player)
 			end
 			task.spawn(runCustomerSpawner, plot, plot.session, player)
 			refreshHelpers(plot, data)
-			task.spawn(runHelpers, plot, plot.session, player)
+			task.spawn(runBaker, plot, plot.session, player)
+			task.spawn(runStocker, plot, plot.session, player)
 			task.spawn(runCrates, plot, plot.session, player)
 			return plot
 		end
