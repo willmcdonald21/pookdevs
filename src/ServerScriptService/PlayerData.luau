@@ -86,17 +86,22 @@ local function cleanGoals(saved)
 	return goals
 end
 
--- Keeps placed items that are owned and inside the walls, and moved stations. Overlaps
--- were checked when each piece was placed.
+-- Keeps placed items that are owned and inside the walls, and moved stations. Wall items
+-- keep their height and must still be on a wall. Overlaps were checked when each piece
+-- was placed.
 local function cleanLayout(data, savedPlaced, savedStock, savedStations)
 	local placedCounts = {}
 	for key, saved in savedPlaced do
 		local item = type(key) == "string" and type(saved) == "table" and Config.GetItem(saved.Id)
-		local entry = item and Layout.CleanEntry(saved.X, saved.Z, saved.R)
+		local entry = item and Layout.CleanEntry(saved.X, saved.Z, saved.R, item.Wall and saved.Y or nil)
 		if entry and (placedCounts[item.Id] or 0) < data.Owned[item.Id] then
 			entry.Id = item.Id
 			local rect = Layout.Rect(Layout.ItemShape(item), entry)
-			if rect.MaxX <= Layout.MaxX and rect.MaxZ <= Layout.MaxZ then
+			local fits = rect.MaxX <= Layout.MaxX and rect.MaxZ <= Layout.MaxZ
+			if item.Wall then
+				fits = entry.Y ~= nil and Layout.OnWall(Layout.ItemThing(key, entry))
+			end
+			if fits then
 				placedCounts[item.Id] = (placedCounts[item.Id] or 0) + 1
 				data.Placed[key] = entry
 				if item.Slots then
