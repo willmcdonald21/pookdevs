@@ -788,6 +788,15 @@ Config.HotbarSize = 5
 -- entry). The last case can't be stored, so customers always have something to visit.
 Config.StarterCase = { Key = "starter", Item = "SmallCase", X = 36, Z = 27, R = 0 }
 
+-- A second, gold oven sold in the Shop as a luxury. Its bake times are multiplied by
+-- BakeTimeScale, so 0.85 bakes 15% faster than the normal oven.
+Config.LuxuryOven = {
+	Name = "Luxury Oven",
+	Coins = 25000,
+	BakeTimeScale = 0.85,
+	Detail = "A gold second oven that bakes 15% faster. Bake two batches at once!",
+}
+
 -- Delivery board: one order per tier at a time. Pay is the treats' sale price times PayScale.
 Config.DeliveryTiers = {
 	{ Name = "Small Order", Min = 1, Max = 2, PayScale = 1.5, Stars = 0, Cooldown = 15 },
