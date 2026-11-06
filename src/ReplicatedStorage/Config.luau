@@ -303,44 +303,59 @@ end
 local CASE_PINK = rgb(240, 150, 175)
 local GLASS = rgb(210, 235, 245)
 
-local function slots(shelves)
-	local list = {}
-	for _, y in shelves do
-		for _, z in { -0.6, 0.6 } do
-			for _, x in { -1.4, 0, 1.4 } do
-				table.insert(list, Vector3.new(x, y, z))
-			end
+-- Display cases hold one row of three treats on each shelf, so every treat shows through
+-- the glass. Shelves are SHELF_GAP studs apart, above a cabinet base studs tall, and the
+-- tallest treat at case size is about 1.1 studs. The cabinet is the first part, because a
+-- case's first part holds its Stock prompt.
+local SHELF_GAP = 1.5
+
+local function displayCase(item, shelves, base)
+	local glassTop = base + shelves * SHELF_GAP - 0.2
+	item.Slots = {}
+	item.Parts = {
+		{ Kind = "Box", Size = Vector3.new(4.6, base, 2.8), Y = base / 2, Color = CASE_PINK, Paint = true },
+	}
+	for shelf = 1, shelves do
+		local surface = base + (shelf - 1) * SHELF_GAP
+		if shelf > 1 then
+			table.insert(item.Parts, {
+				Kind = "Box",
+				Size = Vector3.new(4.6, 0.2, 2.8),
+				Y = surface - 0.1,
+				Color = CASE_PINK,
+				Paint = true,
+				Transparency = 0.5,
+			})
+		end
+		-- Treats sink up to a quarter stud below their slot, so slots sit that far above the shelf.
+		for _, x in { -1.4, 0, 1.4 } do
+			table.insert(item.Slots, Vector3.new(x, surface + 0.25, 0))
 		end
 	end
-	return list
+	table.insert(item.Parts, {
+		Kind = "Box",
+		Size = Vector3.new(4.6, glassTop - base, 2.8),
+		Y = (base + glassTop) / 2,
+		Color = GLASS,
+		Material = Enum.Material.Glass,
+		Transparency = 0.75,
+	})
+	table.insert(item.Parts, {
+		Kind = "Box",
+		Size = Vector3.new(4.8, 0.25, 3),
+		Y = glassTop + 0.1,
+		Color = CASE_PINK,
+		Paint = true,
+		Transparency = 0.5,
+	})
+	return item
 end
 
 Config.Items = {
-	{
-		Id = "SmallCase",
-		Name = "Display Case",
-		Coins = 100,
-		Charm = 0,
-		Slots = slots({ 3.3 }),
-		Parts = {
-			{ Kind = "Box", Size = Vector3.new(4.6, 3, 2.8), Y = 1.5, Color = CASE_PINK, Paint = true },
-			{ Kind = "Box", Size = Vector3.new(4.6, 2, 2.8), Y = 4, Color = GLASS, Material = Enum.Material.Glass, Transparency = 0.7 },
-			{ Kind = "Box", Size = Vector3.new(4.8, 0.25, 3), Y = 5.1, Color = CASE_PINK, Paint = true, Transparency = 0.5 },
-		},
-	},
-	{
-		Id = "BigCase",
-		Name = "Tall Display Case",
-		Coins = 800,
-		Charm = 1,
-		Slots = slots({ 1.9, 4.1 }),
-		Parts = {
-			{ Kind = "Box", Size = Vector3.new(4.6, 1.6, 2.8), Y = 0.8, Color = CASE_PINK, Paint = true },
-			{ Kind = "Box", Size = Vector3.new(4.6, 0.2, 2.8), Y = 3.9, Color = CASE_PINK, Paint = true, Transparency = 0.5 },
-			{ Kind = "Box", Size = Vector3.new(4.6, 4.8, 2.8), Y = 4, Color = GLASS, Material = Enum.Material.Glass, Transparency = 0.75 },
-			{ Kind = "Box", Size = Vector3.new(4.8, 0.25, 3), Y = 6.5, Color = CASE_PINK, Paint = true, Transparency = 0.5 },
-		},
-	},
+	-- Two shelves of three, the same height as before.
+	displayCase({ Id = "SmallCase", Name = "Display Case", Coins = 100, Charm = 0 }, 2, 2.2),
+	-- Four shelves of three. It stays under 7 studs, so wall pieces hung above it still fit.
+	displayCase({ Id = "BigCase", Name = "Tall Display Case", Coins = 800, Charm = 1 }, 4, 0.9),
 	{
 		Id = "Rug",
 		Name = "Cozy Rug",
