@@ -166,10 +166,6 @@ Config.Recipes = {
 	},
 }
 
-local function seconds(count)
-	return count == 1 and "1 second" or ("%d seconds"):format(count)
-end
-
 -- Level 1 of each upgrade is free. Cost is the price of reaching that level.
 Config.Upgrades = {
 	{
@@ -252,18 +248,20 @@ Config.Upgrades = {
 	},
 	-- Helpers: level 1 means not hired. Delay is how long they wait before working.
 	{
+		-- Helpers walk to do their jobs, so each level makes them walk faster. Customers walk
+		-- at CustomerSpeed and you start at 16.
 		Id = "Baker",
 		Name = "Baker Helper",
 		Levels = {
 			{},
-			{ Delay = 4, Cost = 2000 },
-			{ Delay = 1, Cost = 6000 },
+			{ WalkSpeed = 10, Cost = 2000 },
+			{ WalkSpeed = 18, Cost = 6000 },
 		},
 		Describe = function(level)
-			if not level.Delay then
+			if not level.WalkSpeed then
 				return "Not hired yet"
 			end
-			return ("Bakes your last treat again %s after the oven empties"):format(seconds(level.Delay))
+			return ("Fetches ingredients and bakes your last treat again. Walks at speed %d"):format(level.WalkSpeed)
 		end,
 	},
 	{
@@ -271,14 +269,14 @@ Config.Upgrades = {
 		Name = "Stocker Helper",
 		Levels = {
 			{},
-			{ Delay = 6, Cost = 3500 },
-			{ Delay = 2, Cost = 9000 },
+			{ WalkSpeed = 10, Cost = 3500 },
+			{ WalkSpeed = 18, Cost = 9000 },
 		},
 		Describe = function(level)
-			if not level.Delay then
+			if not level.WalkSpeed then
 				return "Not hired yet"
 			end
-			return ("Moves finished batches into your cases after %s"):format(seconds(level.Delay))
+			return ("Carries finished batches to your cases. Walks at speed %d"):format(level.WalkSpeed)
 		end,
 	},
 }
