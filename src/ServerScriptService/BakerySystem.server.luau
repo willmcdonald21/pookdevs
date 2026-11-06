@@ -222,7 +222,7 @@ local function canAffordUpgrade(data)
 			return true
 		end
 	end
-	return not data.LuxuryOven and data.Coins >= Config.LuxuryOven.Coins
+	return false
 end
 
 local function hasOrderItems(data, order)
