@@ -7,6 +7,7 @@ local PathfindingService = game:GetService("PathfindingService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local ServerStorage = game:GetService("ServerStorage")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
@@ -221,7 +222,7 @@ local function canAffordUpgrade(data)
 			return true
 		end
 	end
-	return false
+	return not data.LuxuryOven and data.Coins >= Config.LuxuryOven.Coins
 end
 
 local function hasOrderItems(data, order)
@@ -458,7 +459,12 @@ local function setUpStation(plot, station)
 			offsets[part] = origin:ToObjectSpace(part.CFrame)
 		end
 	end
-	plot.stations[station.Id] = { offsets = offsets, shape = shape, default = Layout.EntryAt(shape, center, 0) }
+	plot.stations[station.Id] = {
+		root = root,
+		offsets = offsets,
+		shape = shape,
+		default = Layout.EntryAt(shape, center, 0),
+	}
 	plot.stationShapes[station.Id] = shape
 end
 
@@ -492,16 +498,55 @@ local function placeStations(plot, data)
 	end
 end
 
+-- Bought stations that the owner hasn't bought wait here, out of sight and out of reach.
+local hiddenStations = Instance.new("Folder")
+hiddenStations.Name = "HiddenStations"
+hiddenStations.Parent = ServerStorage
+
+local function showBoughtStations(plot, data)
+	for _, station in Layout.Stations do
+		if station.Bought then
+			plot.stations[station.Id].root.Parent = hasStation(data, station.Id) and plot.model or hiddenStations
+		end
+	end
+end
+
 local function stationEntries(plot, data)
 	local entries = {}
 	for id in plot.stations do
-		entries[id] = stationEntry(plot, data, id)
+		if hasStation(data, id) then
+			entries[id] = stationEntry(plot, data, id)
+		end
 	end
 	return entries
 end
 
 local function layoutThings(plot, data)
 	return Layout.AllThings(data.Placed, stationEntries(plot, data), plot.stationShapes)
+end
+
+-- Where a newly bought station goes: its default spot if that's free, or else the
+-- first free spot, searching from the back wall forward.
+local function freeStationSpot(plot, data, id)
+	local station = Layout.GetStation(id)
+	local shape = plot.stations[id].shape
+	local others = layoutThings(plot, data)
+	local function fits(entry)
+		return (Layout.Check(Layout.StationThing(station, shape, entry), others))
+	end
+	local default = plot.stations[id].default
+	if fits(default) then
+		return { X = default.X, Z = default.Z, R = default.R }
+	end
+	for z = 0, Layout.Rows - shape.D do
+		for x = 0, Layout.Columns - shape.W do
+			local entry = { X = x, Z = z, R = 0 }
+			if fits(entry) then
+				return entry
+			end
+		end
+	end
+	return nil
 end
 
 local function syncStats(player)
@@ -549,6 +594,7 @@ local function syncStats(player)
 		Owned = data.Owned,
 		Placed = data.Placed,
 		Stations = plot and stationEntries(plot, data) or {},
+		LuxuryOven = data.LuxuryOven,
 		Charm = totalCharm(data),
 		Orders = orders,
 		CanAfford = canAffordUpgrade(data),
@@ -929,7 +975,7 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 		entry.Id = id
 		key = nextPlacedKey(data)
 		thing = Layout.ItemThing(key, entry)
-	elseif plot.stations[id] then
+	elseif plot.stations[id] and hasStation(data, id) then
 		thing = Layout.StationThing(Layout.GetStation(id), plot.stations[id].shape, entry)
 	elseif data.Placed[id] then
 		entry.Id = data.Placed[id].Id
@@ -1026,6 +1072,21 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id)
 			data.Owned[id] += 1
 			syncStats(player)
 			notify(player, item.Name .. " bought! Press Place to put it in your bakery", "Coin")
+		end
+	elseif kind == "LuxuryOven" and not data.LuxuryOven then
+		local cost = Config.LuxuryOven.Coins
+		local entry = data.Coins >= cost and freeStationSpot(plot, data, "LuxuryOven")
+		if data.Coins >= cost and not entry then
+			notify(player, "Make some room in your bakery for the Luxury Oven first")
+			return
+		end
+		if buy(player, data, cost) then
+			data.LuxuryOven = true
+			data.Stations.LuxuryOven = entry
+			showBoughtStations(plot, data)
+			moveStation(plot, "LuxuryOven", entry)
+			syncStats(player)
+			notify(player, "Luxury Oven bought! It's in your bakery. Move it any time with Decorate", "Coin")
 		end
 	end
 end)
@@ -1739,6 +1800,7 @@ local function claimPlot(player)
 			setActive(plot.cookbookPrompt, true)
 			setActive(plot.pantryPrompt, true)
 			setActive(plot.packingPrompt, true)
+			showBoughtStations(plot, data)
 			placeStations(plot, data)
 			for key in data.Placed do
 				buildPlaced(plot, data, key)
@@ -1785,6 +1847,7 @@ local function releasePlot(player)
 	plot.placedFolder:ClearAllChildren()
 	plot.customersFolder:ClearAllChildren()
 	plot.helpersFolder:ClearAllChildren()
+	showBoughtStations(plot, nil)
 	placeStations(plot, nil)
 	removeCrate(plot)
 end
@@ -2049,6 +2112,7 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		setUpStation(plot, station)
 	end
 	placeStations(plot, nil)
+	showBoughtStations(plot, nil)
 	for _, oven in plot.ovens do
 		setActive(oven.prompt, false)
 		oven.prompt.Triggered:Connect(function(player)
