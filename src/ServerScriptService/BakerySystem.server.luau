@@ -1655,8 +1655,19 @@ end
 local PATH_SETTINGS = { AgentRadius = 1.2, AgentHeight = 5, AgentCanJump = false, WaypointSpacing = math.huge }
 local PATH_GROUND = Vector3.new(0, CUSTOMER_HEIGHT - 0.5, 0)
 
--- Walks around furniture inside the bakery. If there's no way through, walks straight.
-local function walkAround(model, to, speed)
+-- Outside, the baseplate, plaza, paths and bakery floors sit at different heights, so a
+-- person's height comes from the ground under them. setUpTown fills in the ground parts.
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Include
+
+local function groundPoint(point)
+	local hit = Workspace:Raycast(Vector3.new(point.X, 50, point.Z), Vector3.new(0, -100, 0), groundParams)
+	return Vector3.new(point.X, (hit and hit.Position.Y or 0) + CUSTOMER_HEIGHT, point.Z)
+end
+
+-- Walks around furniture inside the bakery, or around the fountain, benches and buildings
+-- outside, where each step follows the ground. If there's no way through, walks straight.
+local function walkAround(model, to, speed, outside)
 	local path = PathfindingService:CreatePath(PATH_SETTINGS)
 	local ok = pcall(function()
 		path:ComputeAsync(model.PrimaryPart.Position - PATH_GROUND, to - PATH_GROUND)
@@ -1668,7 +1679,7 @@ local function walkAround(model, to, speed)
 				return
 			end
 			local point = waypoints[index].Position
-			walkCustomer(model, Vector3.new(point.X, to.Y, point.Z), speed)
+			walkCustomer(model, outside and groundPoint(point) or Vector3.new(point.X, to.Y, point.Z), speed)
 		end
 	end
 	if model.Parent then
@@ -1705,23 +1716,76 @@ local function pickStockedCase(plot, data)
 	return keys[math.random(#keys)]
 end
 
--- Walks one customer through: door, a stocked case, the counter to pay, then out.
-local function runCustomer(plot, session)
-	local golden = math.random() < Config.GoldenCustomer.Chance
-	local model, label = buildCustomer(golden)
-	local root = model.PrimaryPart
-	local start = plot.customerStart.Position + Vector3.new(0, 2.2, 0)
-	local door = plot.door.Position + Vector3.new(0, 3, 0)
-	root.CFrame = CFrame.new(start)
-	model.Parent = plot.customersFolder
-	local function gone()
-		return plot.session ~= session or not model.Parent
-	end
+-- Townsfolk. People walk in from the edge of town, stroll between spots on the plaza, and
+-- walk out again. A bakery's customers are townsfolk who head in from the plaza and go back
+-- to it afterwards, so nobody appears or vanishes beside a bakery.
+local FADE_TIME = 1
+local townsfolkFolder = Instance.new("Folder")
+townsfolkFolder.Name = "Townsfolk"
+townsfolkFolder.Parent = Workspace
+-- Filled in by setUpTown. Each stroll spot has a Position to stand at and a Look point to face.
+local town = { center = Vector3.zero, strolls = {}, edges = {} }
+local townsfolk = {}
 
-	walkCustomer(model, door)
-	if gone() then
-		model:Destroy()
-		return
+local function randomBetween(range)
+	return range[1] + math.random() * (range[2] - range[1])
+end
+
+local function flatDistance(a, b)
+	return ((a - b) * Vector3.new(1, 0, 1)).Magnitude
+end
+
+-- Fades a person in (to 0) or out (to 1) at the edge of town.
+local function fade(model, to)
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") or part:IsA("Decal") then
+			TweenService:Create(part, TweenInfo.new(FADE_TIME), { Transparency = to }):Play()
+		elseif part:IsA("Sparkles") then
+			part.Enabled = to == 0
+		end
+	end
+	task.wait(FADE_TIME)
+end
+
+local function turnTo(model, point)
+	local root = model.PrimaryPart
+	local position = root.Position
+	local look = Vector3.new(point.X, position.Y, point.Z)
+	if flatDistance(look, position) > 0.1 then
+		TweenService:Create(root, TweenInfo.new(0.3), { CFrame = CFrame.lookAt(position, look) }):Play()
+	end
+end
+
+-- A random spot on the plaza. Sometimes it's in front of a bakery someone owns, as if
+-- window shopping.
+local function pickStroll()
+	local owned = {}
+	for _, plot in plots do
+		if plot.ownerId then
+			table.insert(owned, plot)
+		end
+	end
+	if #owned > 0 and math.random() < 0.25 then
+		local plot = owned[math.random(#owned)]
+		return { Position = plot.mouth, Look = plot.door.Position }
+	end
+	return town.strolls[math.random(#town.strolls)]
+end
+
+-- One of the two edges of town nearest a point, so nobody crosses the whole plaza to leave.
+local function edgeNear(point)
+	local edges = table.clone(town.edges)
+	table.sort(edges, function(a, b)
+		return flatDistance(a, point) < flatDistance(b, point)
+	end)
+	return edges[math.random(math.min(2, #edges))]
+end
+
+-- Inside a bakery: a stocked case, then the counter to pay. Stops early if the owner leaves.
+local function shopAt(plot, session, person)
+	local model, label = person.model, person.label
+	local function gone()
+		return plot.session ~= session
 	end
 
 	local owner = plot.owner
@@ -1729,15 +1793,13 @@ local function runCustomer(plot, session)
 	local key = data and pickStockedCase(plot, data)
 	local recipe
 	if key then
-		walkAround(model, plot.cases[key].stand)
+		walkAround(model, plot.cases[key].stand, person.speed)
 		if gone() then
-			model:Destroy()
 			return
 		end
 		say(label, "Hmm, let me see...")
 		task.wait(Config.BrowseTime)
 		if gone() then
-			model:Destroy()
 			return
 		end
 		-- Another customer may have emptied this case, or the owner may have moved it.
@@ -1752,14 +1814,13 @@ local function runCustomer(plot, session)
 
 	if recipe then
 		say(label, ("Mmm, %s!"):format(recipe.Name:lower()))
-		walkAround(model, payPosition(plot, data))
+		walkAround(model, payPosition(plot, data), person.speed)
 		if gone() then
-			model:Destroy()
 			return
 		end
 		local price = salePrice(data, recipe)
 		local tip = 0
-		if golden then
+		if person.golden then
 			price *= Config.GoldenCustomer.PayScale
 			if math.random() < Config.GoldenCustomer.StarChance then
 				tip = 1
@@ -1769,7 +1830,7 @@ local function runCustomer(plot, session)
 		data.Stars += tip
 		addGoalProgress(data, "Sell", table.find(Config.Recipes, recipe))
 		syncStats(owner)
-		if golden then
+		if person.golden then
 			local tipText = tip > 0 and " and tipped a Sugar Star" or ""
 			notify(owner, ("+%d coins: a golden customer bought %s%s!"):format(coins, recipe.Name:lower(), tipText), "Coin")
 		else
@@ -1781,16 +1842,218 @@ local function runCustomer(plot, session)
 		say(label, "Nothing to buy!")
 		task.wait(1.2)
 	end
-	if gone() then
-		model:Destroy()
-		return
+end
+
+-- Takes a person from wherever they are to a bakery's path, up it and through the door to
+-- shop, then back out and down the path to the plaza. If the owner leaves on the way, the
+-- person heads back to the plaza.
+local function visitBakery(person)
+	local plot, session = person.visit, person.visitSession
+	local model = person.model
+	local door = plot.door.Position + Vector3.new(0, 3, 0)
+	walkAround(model, plot.mouth, person.speed, true)
+	if plot.session == session then
+		walkCustomer(model, door, person.speed)
+		if plot.session == session then
+			shopAt(plot, session, person)
+			walkAround(model, door, person.speed)
+		end
+		person.label.Visible = false
+		walkCustomer(model, plot.mouth, person.speed)
 	end
-	walkAround(model, door)
-	if not gone() then
-		label.Visible = false
-		walkCustomer(model, start)
+	if plot.session == session then
+		plot.visitors -= 1
 	end
+	person.visit = nil
+	person.label.Visible = false
+end
+
+-- A person strolls between a few spots, shopping whenever a bakery calls them in, then
+-- walks out of town.
+local function runPerson(person)
+	local model = person.model
+	model.Parent = townsfolkFolder
+	fade(model, 0)
+	local stops = math.random(Config.Townsfolk.Stops[1], Config.Townsfolk.Stops[2])
+	while true do
+		if person.visit then
+			visitBakery(person)
+			stops = math.random(Config.Townsfolk.StopsAfterShopping[1], Config.Townsfolk.StopsAfterShopping[2])
+		elseif stops <= 0 then
+			break
+		else
+			local spot = pickStroll()
+			walkAround(model, spot.Position, person.speed, true)
+			if not person.visit then
+				turnTo(model, spot.Look)
+				local leaveAt = os.clock() + randomBetween(Config.Townsfolk.StopTime)
+				while os.clock() < leaveAt and not person.visit do
+					task.wait(0.25)
+				end
+			end
+			stops -= 1
+		end
+	end
+	person.leaving = true
+	walkAround(model, edgeNear(model.PrimaryPart.Position), person.speed, true)
+	fade(model, 1)
+	townsfolk[person] = nil
 	model:Destroy()
+end
+
+-- A new person, invisible until they fade in. They start walking on the next frame, so a
+-- caller can send them to a bakery first.
+local function spawnPerson(position)
+	local golden = math.random() < Config.GoldenCustomer.Chance
+	local model, label = buildCustomer(golden)
+	model.PrimaryPart.CFrame = CFrame.lookAt(position, Vector3.new(town.center.X, position.Y, town.center.Z))
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") or part:IsA("Decal") then
+			part.Transparency = 1
+		elseif part:IsA("Sparkles") then
+			part.Enabled = false
+		end
+	end
+	local person = {
+		model = model,
+		label = label,
+		golden = golden,
+		speed = Config.CustomerSpeed * randomBetween(Config.Townsfolk.Speed),
+		visit = nil,
+		visitSession = nil,
+		leaving = false,
+	}
+	townsfolk[person] = true
+	task.defer(runPerson, person)
+	return person
+end
+
+-- Sends someone to a bakery: one of the three free townsfolk nearest its path, or a
+-- newcomer from the nearest edge of town when everyone's busy.
+local function requestCustomer(plot, session)
+	local free = {}
+	for person in townsfolk do
+		if not person.visit and not person.leaving then
+			table.insert(free, person)
+		end
+	end
+	table.sort(free, function(a, b)
+		return flatDistance(a.model.PrimaryPart.Position, plot.mouth) < flatDistance(b.model.PrimaryPart.Position, plot.mouth)
+	end)
+	local person = free[math.random(math.clamp(#free, 1, 3))] or spawnPerson(edgeNear(plot.mouth))
+	person.visit = plot
+	person.visitSession = session
+	plot.visitors += 1
+end
+
+-- How many people should be strolling: more when more bakeries are open.
+local function crowdTarget()
+	local owned = 0
+	for _, plot in plots do
+		if plot.ownerId then
+			owned += 1
+		end
+	end
+	local settings = Config.Townsfolk
+	return math.min(settings.Base + owned * settings.PerBakery, settings.Max)
+end
+
+-- Keeps the plaza busy. People shopping or leaving don't count, so the plaza stays lively
+-- while bakeries are busy.
+local function runCrowd()
+	while true do
+		local strolling = 0
+		for person in townsfolk do
+			if not person.visit and not person.leaving then
+				strolling += 1
+			end
+		end
+		if strolling < crowdTarget() then
+			spawnPerson(town.edges[math.random(#town.edges)])
+		end
+		task.wait(randomBetween(Config.Townsfolk.ArrivalGap))
+	end
+end
+
+-- Works out the stroll spots, each bakery's path mouth and the edges of town from the world
+-- that tools/build_town.luau built.
+local function setUpTown()
+	local townModel = Workspace:WaitForChild("Town")
+	local plaza = townModel:WaitForChild("Plaza")
+	town.center = plaza.Position
+	-- The plaza is a cylinder lying on its side, so its Y and Z sizes are its diameter.
+	local radius = plaza.Size.Y / 2
+
+	local ground = { plaza }
+	for _, part in townModel:GetChildren() do
+		if part.Name == "Path" or part.Name == "PlazaRim" then
+			table.insert(ground, part)
+		end
+	end
+	local baseplate = Workspace:FindFirstChild("Baseplate")
+	if baseplate then
+		table.insert(ground, baseplate)
+	end
+	for _, plot in plots do
+		table.insert(ground, plot.model.Floor)
+	end
+	groundParams.FilterDescendantsInstances = ground
+
+	local function addStroll(position, look)
+		table.insert(town.strolls, { Position = groundPoint(position), Look = look })
+	end
+	local function direction(degrees)
+		local angle = math.rad(degrees)
+		return Vector3.new(math.cos(angle), 0, math.sin(angle))
+	end
+	-- Around the fountain, looking at it.
+	local fountainRadius = townModel.Fountain.Basin.Size.Y / 2
+	for step = 0, 7 do
+		addStroll(town.center + direction(step * 45 + 22.5) * (fountainRadius + 4), town.center)
+	end
+	-- Further out, looking at the bakeries.
+	for step = 0, 9 do
+		local out = direction(step * 36)
+		addStroll(town.center + out * radius * 0.57, town.center + out * radius)
+	end
+	-- In front of each bench, looking at the fountain.
+	for _, bench in townModel:GetChildren() do
+		if bench.Name == "Bench" then
+			local position = bench:GetPivot().Position
+			local inward = ((town.center - position) * Vector3.new(1, 0, 1)).Unit
+			addStroll(position + inward * 2.5, town.center)
+		end
+	end
+
+	-- Each bakery's path meets the plaza a little inside its edge. The door's +Z faces the plaza.
+	local angles = {}
+	local farthest = 0
+	for _, plot in plots do
+		local point = plot.door.Position
+		for _ = 1, 200 do
+			if flatDistance(point, town.center) <= radius - 4 then
+				break
+			end
+			point += plot.door.ZVector
+		end
+		plot.mouth = groundPoint(point)
+		local offset = plot.model.Floor.Position - town.center
+		farthest = math.max(farthest, flatDistance(plot.model.Floor.Position, town.center))
+		table.insert(angles, math.atan2(offset.Z, offset.X))
+	end
+	local grocery = Workspace:FindFirstChild("GroceryStore")
+	if grocery then
+		local offset = grocery:GetPivot().Position - town.center
+		table.insert(angles, math.atan2(offset.Z, offset.X))
+	end
+	-- Edges of town: out past the trees in each gap between buildings, a little to one side
+	-- of the tree there.
+	table.sort(angles)
+	for index, angle in angles do
+		local gap = (angles[index % #angles + 1] - angle) % (2 * math.pi)
+		local between = math.deg(angle + gap / 2) + 5
+		table.insert(town.edges, groundPoint(town.center + direction(between) * (farthest + 70)))
+	end
 end
 
 local function customerInterval(data)
@@ -1800,8 +2063,8 @@ end
 
 local function runCustomerSpawner(plot, session, player)
 	while plot.session == session do
-		if #plot.customersFolder:GetChildren() < Config.MaxCustomers then
-			task.spawn(runCustomer, plot, session)
+		if plot.visitors < Config.MaxCustomers then
+			requestCustomer(plot, session)
 		end
 		local data = PlayerData.Get(player)
 		if not data then
@@ -2132,7 +2395,8 @@ local function releasePlot(player)
 	plot.cases = {}
 	plot.orders = {}
 	plot.placedFolder:ClearAllChildren()
-	plot.customersFolder:ClearAllChildren()
+	-- Customers on their way or inside see the session change and head back to the plaza.
+	plot.visitors = 0
 	plot.helpersFolder:ClearAllChildren()
 	showBoughtStations(plot, nil)
 	placeStations(plot, nil)
@@ -2385,9 +2649,11 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		stations = {},
 		stationShapes = {},
 		playerSpawn = model.Spots.PlayerSpawn,
-		customerStart = model.Spots.CustomerStart,
 		door = floor.CFrame * CFrame.new(0, 0.6, 19),
-		customersFolder = model.Customers,
+		-- Where the bakery's path meets the plaza, set by setUpTown.
+		mouth = nil,
+		-- Customers on their way to the bakery or inside it.
+		visitors = 0,
 		helpersFolder = helpersFolder,
 		-- Outside the door, beside the customer path.
 		crateSpot = floor.CFrame * CFrame.new(9, floor.Size.Y / 2, 24),
@@ -2452,6 +2718,13 @@ end
 table.sort(plots, function(a, b)
 	return a.model.Name < b.model.Name
 end)
+
+-- The plaza starts with people already strolling, then more walk in from the edges.
+setUpTown()
+for _ = 1, Config.Townsfolk.Base do
+	spawnPerson(town.strolls[math.random(#town.strolls)].Position)
+end
+task.spawn(runCrowd)
 
 PurchaseHandler.Start(function(player, product)
 	syncStats(player)
