@@ -797,120 +797,547 @@ local function myPlot()
 	return nil
 end
 
--- Placing items
-local EMPTY_PAD = Color3.fromRGB(120, 220, 140)
-local FULL_PAD = Color3.fromRGB(255, 180, 90)
-local PLACING_CAMERA_HEIGHT = 58
-local PLACING_CAMERA_BACK = 12
-local placing = false
-local placingItem = nil
+-- Decorating
+-- Pieces snap to a grid on your floor while the camera and controls work as normal.
+-- The preview uses the same Layout rules as the server, which checks every spot again.
+local OK_COLOR = Color3.fromRGB(120, 220, 140)
+local BLOCKED_COLOR = Color3.fromRGB(225, 95, 95)
+local FRONT_COLOR = Color3.fromRGB(150, 200, 255)
+local DOORWAY_COLOR = Color3.fromRGB(255, 200, 120)
+local GHOST_TRANSPARENCY = 0.45
+local ARROW_ANGLE = math.rad(35)
+local MOVE_HINT = "Tap or click anything in your bakery to move it"
+-- Copies of a station keep their parts but none of their prompts, labels or effects.
+local GHOST_REMOVES = { "ProximityPrompt", "BillboardGui", "ParticleEmitter", "Sparkles", "Sound", "ClickDetector" }
 
-local placeBanner = label("PlaceBanner", UDim2.new(0.5, 0, 0, 32), UDim2.new(0.5, 0, 0, 42), TOP_CENTER, GREEN, WHITE)
+local decorating = false
+local held = nil
+local pending = nil
+local grid = nil
+local hiddenGuis = {}
+
+local placeBanner = label("PlaceBanner", UDim2.new(0.5, 0, 0, 32), UDim2.new(0.5, 0, 0, 78), TOP_CENTER, GREEN, WHITE)
 placeBanner.Visible = false
 placeBanner.ZIndex = 3
-local placeDone =
-	button("PlaceDone", UDim2.fromOffset(120, 46), UDim2.new(0.5, 0, 1, -10), Vector2.new(0.5, 1), PINK)
-placeDone.Text = "Done"
-placeDone.Visible = false
 
--- The hotbar shares the bottom of the screen with Done and sits under open menus.
+local placeBar = Instance.new("Frame")
+placeBar.Name = "PlaceBar"
+placeBar.Size = UDim2.fromOffset(440, 46)
+placeBar.Position = UDim2.new(0.5, 0, 1, -10)
+placeBar.AnchorPoint = BOTTOM_CENTER
+placeBar.BackgroundTransparency = 1
+placeBar.Visible = false
+placeBar.Parent = gui
+local placeBarLayout = Instance.new("UIListLayout")
+placeBarLayout.FillDirection = Enum.FillDirection.Horizontal
+placeBarLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+placeBarLayout.Padding = UDim.new(0, 8)
+placeBarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+placeBarLayout.Parent = placeBar
+
+local function barButton(name, order, color)
+	local object = button(name, UDim2.fromOffset(100, 46), UDim2.new(), TOP_LEFT, color, placeBar)
+	object.Text = name
+	object.LayoutOrder = order
+	return object
+end
+
+local rotateButton = barButton("Rotate", 1, BLUE)
+local placeButton = barButton("Place", 2, GREEN)
+local putAwayButton = barButton("Store", 3, GOLD)
+local cancelButton = barButton("Cancel", 4, PINK)
+local doneButton = barButton("Done", 5, PINK)
+
+-- The hotbar shares the bottom of the screen with these buttons and sits under open menus.
 refreshHotbarVisible = function()
-	local show = currentPanel == nil and not placing
+	local show = currentPanel == nil and not decorating
 	hotbar.Visible = show
 	trayLabel.Visible = show
 end
 
-local function refreshPads()
-	local plot = myPlot()
-	if not plot then
+local function floorTop(plot)
+	local floor = plot.Floor
+	return floor.CFrame * CFrame.new(0, floor.Size.Y / 2, 0)
+end
+
+local function allThings(plot)
+	local shapes = {}
+	for _, station in Layout.Stations do
+		local instance = plot:FindFirstChild(station.Path)
+		shapes[station.Id] = instance and Layout.StationShape(station, instance)
+	end
+	return Layout.AllThings(state.Placed, state.Stations, shapes)
+end
+
+local function pieceInstance(plot, key)
+	local station = Layout.GetStation(key)
+	if station then
+		return plot:FindFirstChild(station.Path)
+	end
+	return plot.Placed:FindFirstChild("Placed_" .. key)
+end
+
+local function markerPart(name, size, color, transparency, parent)
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Material = Enum.Material.SmoothPlastic
+	part.Size = size
+	part.Color = color
+	part.Transparency = transparency
+	part.Parent = parent
+	return part
+end
+
+-- Grid lines on your floor, with the doorway that must stay clear tinted.
+local function showGrid(plot)
+	local top = floorTop(plot)
+	grid = Instance.new("Folder")
+	grid.Name = "DecorGrid"
+	local middleX = (Layout.MinX + Layout.MaxX) / 2
+	local middleZ = (Layout.MinZ + Layout.MaxZ) / 2
+	for column = 0, Layout.Columns do
+		local line = markerPart("Line", Vector3.new(0.06, 0.02, Layout.Rows), WHITE, 0.55, grid)
+		line.CFrame = top * CFrame.new(Layout.MinX + column, 0.02, middleZ)
+	end
+	for row = 0, Layout.Rows do
+		local line = markerPart("Line", Vector3.new(Layout.Columns, 0.02, 0.06), WHITE, 0.55, grid)
+		line.CFrame = top * CFrame.new(middleX, 0.02, Layout.MinZ + row)
+	end
+	local entrance = Layout.Entrance
+	local doorwaySize = Vector3.new(entrance.MaxX - entrance.MinX, 0.02, entrance.MaxZ - entrance.MinZ)
+	local doorway = markerPart("Doorway", doorwaySize, DOORWAY_COLOR, 0.55, grid)
+	doorway.CFrame = top * CFrame.new(Layout.Center(entrance) + Vector3.new(0, 0.03, 0))
+	grid.Parent = Workspace
+end
+
+-- The outline under the preview: green or red, a blue strip where customers stand, and
+-- an arrow showing which way the piece faces.
+local marker = Instance.new("Model")
+marker.Name = "PlaceMarker"
+local markerPad = markerPart("Pad", Vector3.one, OK_COLOR, 0.35, marker)
+local markerFront = markerPart("Front", Vector3.one, FRONT_COLOR, 0.5, marker)
+local arrowShaft = markerPart("Shaft", Vector3.new(0.3, 0.06, 1), WHITE, 0, marker)
+local arrowLeft = markerPart("ArrowLeft", Vector3.new(0.3, 0.06, 1.2), WHITE, 0, marker)
+local arrowRight = markerPart("ArrowRight", Vector3.new(0.3, 0.06, 1.2), WHITE, 0, marker)
+
+local ghostHighlight = Instance.new("Highlight")
+ghostHighlight.Name = "GhostHighlight"
+ghostHighlight.FillTransparency = 0.65
+ghostHighlight.Parent = gui
+local hoverHighlight = Instance.new("Highlight")
+hoverHighlight.Name = "HoverHighlight"
+hoverHighlight.FillTransparency = 1
+hoverHighlight.OutlineColor = GOLD
+hoverHighlight.Parent = gui
+
+local function flatSize(rect, height)
+	return Vector3.new(rect.MaxX - rect.MinX, height, rect.MaxZ - rect.MinZ)
+end
+
+local function updateMarker(top, thing, ok)
+	local rect = thing.Rect
+	local center = Layout.Center(rect)
+	markerPad.Size = flatSize(rect, 0.05)
+	markerPad.CFrame = top * CFrame.new(center + Vector3.new(0, 0.05, 0))
+	markerPad.Color = ok and OK_COLOR or BLOCKED_COLOR
+	markerFront.Transparency = thing.Front and 0.5 or 1
+	if thing.Front then
+		markerFront.Size = flatSize(thing.Front, 0.05)
+		markerFront.CFrame = top * CFrame.new(Layout.Center(thing.Front) + Vector3.new(0, 0.05, 0))
+	end
+	local length = math.abs(flatSize(rect, 0):Dot(thing.Facing)) / 2 + 1
+	local base = Vector3.new(center.X, 0.12, center.Z)
+	local arrow = top * CFrame.lookAt(base, base + thing.Facing)
+	arrowShaft.Size = Vector3.new(0.3, 0.06, length)
+	arrowShaft.CFrame = arrow * CFrame.new(0, 0, -length / 2)
+	local tip = arrow * CFrame.new(0, 0, -length)
+	arrowLeft.CFrame = tip * CFrame.Angles(0, ARROW_ANGLE, 0) * CFrame.new(0, 0, 0.6)
+	arrowRight.CFrame = tip * CFrame.Angles(0, -ARROW_ANGLE, 0) * CFrame.new(0, 0, 0.6)
+end
+
+-- Hides a piece on this screen only while its preview is being moved.
+local function setHidden(instance, hide)
+	if not instance then
 		return
 	end
-	for _, pad in plot.DecorSpots:GetChildren() do
-		if placing then
-			local full = state.Placed[pad.Name] ~= nil
-			pad.Color = full and FULL_PAD or EMPTY_PAD
-			pad.Transparency = 0.45
-		else
-			pad.Transparency = 1
+	local objects = instance:GetDescendants()
+	table.insert(objects, instance)
+	for _, object in objects do
+		if object:IsA("BasePart") then
+			object.LocalTransparencyModifier = hide and 1 or 0
+		elseif object:IsA("BillboardGui") then
+			if hide then
+				hiddenGuis[object] = object.Enabled
+				object.Enabled = false
+			elseif hiddenGuis[object] ~= nil then
+				object.Enabled = hiddenGuis[object]
+				hiddenGuis[object] = nil
+			end
 		end
 	end
 end
 
-local function refreshBanner()
-	if placingItem then
-		local item = Config.GetItem(placingItem)
-		placeBanner.Text = ("Tap a green square to place: %s"):format(item.Name)
-	else
-		placeBanner.Text = "Tap an orange square to store that item"
+local function makeGhost(model)
+	for _, object in model:GetDescendants() do
+		if object:IsA("BasePart") then
+			object.Anchored = true
+			object.CanCollide = false
+			object.CanQuery = false
+			object.CanTouch = false
+			object.CastShadow = false
+			object.LocalTransparencyModifier = 0
+			object.Transparency = math.max(object.Transparency, GHOST_TRANSPARENCY)
+		elseif table.find(GHOST_REMOVES, object.ClassName) then
+			object:Destroy()
+		end
 	end
+	model.Parent = Workspace
+	return model
 end
 
--- Placing uses a top-down camera so every square in the bakery can be seen and tapped.
-local function setPlacingCamera(active)
-	local camera = Workspace.CurrentCamera
+local function heldThing()
+	local entry = held.entry
+	if held.stationId then
+		return Layout.StationThing(Layout.GetStation(held.stationId), held.shape, entry)
+	end
+	return Layout.ItemThing(held.key or "new", { Id = held.itemId, X = entry.X, Z = entry.Z, R = entry.R })
+end
+
+local function refreshHeld()
 	local plot = myPlot()
-	if active and plot then
-		local center = plot.Floor.Position
-		local eye = (plot.Floor.CFrame * CFrame.new(0, PLACING_CAMERA_HEIGHT, PLACING_CAMERA_BACK)).Position
-		camera.CameraType = Enum.CameraType.Scriptable
-		camera.CFrame = CFrame.lookAt(eye, center)
-	else
-		camera.CameraType = Enum.CameraType.Custom
+	if not held or not plot then
+		return
+	end
+	local top = floorTop(plot)
+	held.ghost:PivotTo(Layout.CFrame(top, held.shape, held.entry) * held.base)
+	local thing = heldThing()
+	local ok, reason = Layout.Check(thing, allThings(plot))
+	held.ok = ok
+	updateMarker(top, thing, ok)
+	local color = ok and OK_COLOR or BLOCKED_COLOR
+	ghostHighlight.FillColor = color
+	ghostHighlight.OutlineColor = color
+	placeBanner.Text = ok and ((held.key and "Moving " or "Placing ") .. held.name) or reason
+	placeBanner.BackgroundColor3 = ok and GREEN or BLOCKED_COLOR
+	placeButton.BackgroundColor3 = ok and GREEN or GREY
+end
+
+local function refreshBar()
+	placeBanner.Visible = decorating
+	placeBar.Visible = decorating
+	rotateButton.Visible = held ~= nil
+	placeButton.Visible = held ~= nil
+	putAwayButton.Visible = held ~= nil and held.key ~= nil and held.stationId == nil
+	cancelButton.Visible = held ~= nil
+	doneButton.Visible = held == nil
+	if decorating and not held then
+		placeBanner.Text = MOVE_HINT
+		placeBanner.BackgroundColor3 = GREEN
 	end
 end
 
+local function hold(info)
+	held = info
+	setHidden(info.original, true)
+	marker.Parent = Workspace
+	ghostHighlight.Adornee = info.ghost
+	hoverHighlight.Adornee = nil
+	refreshHeld()
+	refreshBar()
+end
+
+local function pointInFront(plot)
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	local position = root and root.Position + root.CFrame.LookVector * 8 or plot.Floor.Position
+	return plot.Floor.CFrame:PointToObjectSpace(position)
+end
+
+-- A new item starts in front of you, facing the door. A placed one starts where it is.
+local function holdItem(itemId, key)
+	local plot = myPlot()
+	local item = Config.GetItem(itemId)
+	local shape = Layout.ItemShape(item)
+	local entry
+	if key then
+		local saved = state.Placed[key]
+		entry = { X = saved.X, Z = saved.Z, R = saved.R }
+	else
+		entry = Layout.EntryAt(shape, pointInFront(plot), 0)
+	end
+	local ghost = makeGhost(ItemBuilder.Build(item, 1, CFrame.new(), false))
+	hold({
+		itemId = itemId,
+		key = key,
+		name = item.Name,
+		shape = shape,
+		entry = entry,
+		ghost = ghost,
+		base = ghost:GetPivot(),
+		original = key and pieceInstance(plot, key),
+	})
+end
+
+local function holdStation(id)
+	local plot = myPlot()
+	local station = Layout.GetStation(id)
+	local instance = plot:FindFirstChild(station.Path)
+	local shape = instance and Layout.StationShape(station, instance)
+	local saved = state.Stations[id]
+	if not shape or not saved then
+		return
+	end
+	local entry = { X = saved.X, Z = saved.Z, R = saved.R }
+	local ghost = Instance.new("Model")
+	ghost.Name = "Ghost"
+	instance:Clone().Parent = ghost
+	makeGhost(ghost)
+	hold({
+		stationId = id,
+		key = id,
+		name = station.Name,
+		shape = shape,
+		entry = entry,
+		ghost = ghost,
+		base = Layout.CFrame(floorTop(plot), shape, entry):ToObjectSpace(ghost:GetPivot()),
+		original = instance,
+	})
+end
+
+local function finishPending()
+	if pending then
+		pending.ghost:Destroy()
+		setHidden(pending.original, false)
+		pending = nil
+	end
+end
+
+-- Lets go of the held piece. When waiting, its preview stays until the server's next
+-- update, so the piece doesn't flicker back to its old spot first.
+local function drop(waiting)
+	if not held then
+		return
+	end
+	local current = held
+	held = nil
+	ghostHighlight.Adornee = nil
+	marker.Parent = nil
+	if waiting then
+		finishPending()
+		pending = current
+	else
+		current.ghost:Destroy()
+		setHidden(current.original, false)
+	end
+	refreshBar()
+end
+
+local function setDecorating(on)
+	if decorating == on then
+		return
+	end
+	decorating = on
+	if on then
+		local plot = myPlot()
+		if plot then
+			showGrid(plot)
+		end
+	else
+		drop(false)
+		finishPending()
+		if grid then
+			grid:Destroy()
+			grid = nil
+		end
+		hoverHighlight.Adornee = nil
+	end
+	refreshHotbarVisible()
+	refreshBar()
+end
+
+-- With an item Id, holds that item from storage. With nil, starts Move mode.
 startPlacing = function(itemId)
-	placing = true
-	placingItem = itemId
 	setPanel(nil)
-	setPlacingCamera(true)
-	placeBanner.Visible = true
-	placeDone.Visible = true
-	refreshHotbarVisible()
-	refreshBanner()
-	refreshPads()
+	if not myPlot() then
+		return
+	end
+	setDecorating(true)
+	drop(false)
+	if itemId then
+		holdItem(itemId, nil)
+	end
 end
 
-local function stopPlacing()
-	placing = false
-	placingItem = nil
-	setPlacingCamera(false)
-	placeBanner.Visible = false
-	placeDone.Visible = false
-	refreshHotbarVisible()
-	refreshPads()
-end
-
-placeDone.Activated:Connect(stopPlacing)
-
-UserInputService.InputBegan:Connect(function(input, processed)
-	if processed or not placing then
-		return
-	end
-	local isClick = input.UserInputType == Enum.UserInputType.MouseButton1
-	if not isClick and input.UserInputType ~= Enum.UserInputType.Touch then
-		return
-	end
-	local plot = myPlot()
-	if not plot then
-		return
-	end
-	local camera = Workspace.CurrentCamera
-	local ray = camera:ScreenPointToRay(input.Position.X, input.Position.Y)
+local function floorPointAt(plot, ray)
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { plot.DecorSpots }
-	local result = Workspace:Raycast(ray.Origin, ray.Direction * 300, params)
-	if not result then
+	params.FilterDescendantsInstances = { plot.Floor }
+	local result = Workspace:Raycast(ray.Origin, ray.Direction * 500, params)
+	return result and plot.Floor.CFrame:PointToObjectSpace(result.Position)
+end
+
+-- Solid pieces win over rugs underneath them.
+local function pieceAt(plot, point)
+	local flat = nil
+	for _, thing in allThings(plot) do
+		local rect = thing.Rect
+		if point.X >= rect.MinX and point.X <= rect.MaxX and point.Z >= rect.MinZ and point.Z <= rect.MaxZ then
+			if not thing.Flat then
+				return thing
+			end
+			flat = flat or thing
+		end
+	end
+	return flat
+end
+
+local function pickUp(thing)
+	finishPending()
+	if Layout.GetStation(thing.Key) then
+		holdStation(thing.Key)
+	else
+		holdItem(state.Placed[thing.Key].Id, thing.Key)
+	end
+end
+
+local function moveHeldTo(point)
+	local entry = Layout.EntryAt(held.shape, point, held.entry.R)
+	if entry.X ~= held.entry.X or entry.Z ~= held.entry.Z then
+		held.entry = entry
+		refreshHeld()
+	end
+end
+
+local function rotateHeld()
+	if held then
+		held.entry = Layout.Rotated(held.shape, held.entry)
+		refreshHeld()
+	end
+end
+
+local function tryPlace()
+	if not held or not held.ok then
 		return
 	end
-	local spot = tonumber(result.Instance.Name)
-	if placingItem then
-		placeEvent:FireServer(spot, placingItem)
-	elseif state.Placed[result.Instance.Name] then
-		placeEvent:FireServer(spot, nil)
+	local entry = held.entry
+	if held.key then
+		placeEvent:FireServer("Move", held.key, entry.X, entry.Z, entry.R)
+	else
+		placeEvent:FireServer("New", held.itemId, entry.X, entry.Z, entry.R)
+	end
+	drop(true)
+end
+
+rotateButton.Activated:Connect(rotateHeld)
+placeButton.Activated:Connect(tryPlace)
+cancelButton.Activated:Connect(function()
+	drop(false)
+end)
+putAwayButton.Activated:Connect(function()
+	if held and held.key then
+		placeEvent:FireServer("Store", held.key)
+		drop(true)
 	end
 end)
+doneButton.Activated:Connect(function()
+	setDecorating(false)
+end)
+
+local function pointerOverGui(position)
+	for _, object in player.PlayerGui:GetGuiObjectsAtPosition(position.X, position.Y) do
+		if object:IsDescendantOf(gui) then
+			return true
+		end
+	end
+	return false
+end
+
+-- With a mouse, the preview follows the pointer. Without a held piece, the piece under
+-- the pointer is outlined.
+RunService.RenderStepped:Connect(function()
+	local plot = myPlot()
+	if not decorating or not plot or not UserInputService.MouseEnabled then
+		return
+	end
+	local mouse = UserInputService:GetMouseLocation()
+	if pointerOverGui(mouse - GuiService:GetGuiInset()) then
+		return
+	end
+	local point = floorPointAt(plot, Workspace.CurrentCamera:ViewportPointToRay(mouse.X, mouse.Y))
+	if held then
+		if point then
+			moveHeldTo(point)
+		end
+	else
+		local thing = point and pieceAt(plot, point)
+		hoverHighlight.Adornee = thing and pieceInstance(plot, thing.Key)
+		placeBanner.Text = thing and ("Click to move the " .. thing.Name:lower()) or MOVE_HINT
+	end
+end)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed or not decorating then
+		return
+	end
+	local plot = myPlot()
+	if input.KeyCode == Enum.KeyCode.R then
+		rotateHeld()
+	elseif input.UserInputType == Enum.UserInputType.MouseButton1 and plot then
+		if held then
+			tryPlace()
+		else
+			local ray = Workspace.CurrentCamera:ScreenPointToRay(input.Position.X, input.Position.Y)
+			local point = floorPointAt(plot, ray)
+			local thing = point and pieceAt(plot, point)
+			if thing then
+				pickUp(thing)
+			end
+		end
+	end
+end)
+
+-- On a phone, a tap moves the preview there, or picks up the piece that was tapped.
+UserInputService.TouchTap:Connect(function(positions, processed)
+	local plot = myPlot()
+	if processed or not decorating or not plot then
+		return
+	end
+	local position = positions[1]
+	local point = floorPointAt(plot, Workspace.CurrentCamera:ScreenPointToRay(position.X, position.Y))
+	if not point then
+		return
+	end
+	if held then
+		moveHeldTo(point)
+	else
+		local thing = pieceAt(plot, point)
+		if thing then
+			pickUp(thing)
+		end
+	end
+end)
+
+-- Drops a held piece that has gone from storage or from the bakery, and rechecks the
+-- preview against the latest layout.
+local function refreshDecorating()
+	finishPending()
+	if not decorating then
+		return
+	end
+	if held and not held.stationId then
+		local gone = held.key ~= nil and state.Placed[held.key] == nil
+		local noneLeft = held.key == nil and state.Owned[held.itemId] - placedCount(held.itemId) <= 0
+		if gone or noneLeft then
+			drop(false)
+		end
+	end
+	refreshHeld()
+	refreshBar()
+end
 
 local SLOT_KEYS = { Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four, Enum.KeyCode.Five }
 
@@ -964,13 +1391,7 @@ stateEvent.OnClientEvent:Connect(function(newState)
 		trayLabel.Text = carrying
 	end
 	refreshPanel()
-	if placing then
-		if placingItem and state.Owned[placingItem] - placedCount(placingItem) <= 0 then
-			placingItem = nil
-			refreshBanner()
-		end
-		refreshPads()
-	end
+	refreshDecorating()
 end)
 
 local function refreshHint()
