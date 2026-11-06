@@ -1917,8 +1917,19 @@ local function setHelperTray(model, recipeIndex)
 	tray.Parent = model
 end
 
+-- A random unlocked recipe there are ingredients for, or nil when there's none.
+local function randomBakeable(data)
+	local bakeable = {}
+	for index = 1, data.RecipesUnlocked do
+		if not missingIngredients(data, Config.Recipes[index]) then
+			table.insert(bakeable, Config.Recipes[index])
+		end
+	end
+	return bakeable[math.random(math.max(#bakeable, 1))]
+end
+
 -- The Baker fetches ingredients from the pantry shelf, carries them to an empty oven, and
--- bakes your last treat again once they're standing at it.
+-- bakes a random treat you have ingredients for once they're standing at it.
 local function runBaker(plot, session, player)
 	while plot.session == session do
 		task.wait(0.5)
@@ -1930,8 +1941,8 @@ local function runBaker(plot, session, player)
 		local model = plot.helpersFolder:FindFirstChild("Baker")
 		if speed and model then
 			local label = model.PrimaryPart.Bubble.Label
-			local recipe = Config.Recipes[data.LastRecipe]
-			local oven = recipe and not missingIngredients(data, recipe) and firstOven(plot, data, "idle")
+			local recipe = randomBakeable(data)
+			local oven = recipe and firstOven(plot, data, "idle")
 			if oven then
 				say(label, "Getting ingredients")
 				if not helperWalk(plot, session, model, spotBy(plot, stationThing(plot, data, "Pantry"), 0), speed) then
@@ -1943,8 +1954,11 @@ local function runBaker(plot, session, player)
 					return
 				end
 				-- You may have used the oven or the ingredients while the Baker was walking.
-				recipe = Config.Recipes[data.LastRecipe]
-				if oven.state == "idle" and hasStation(data, oven.model.Name) and recipe and not missingIngredients(data, recipe) then
+				-- If that treat can't be baked now, they bake another one they can.
+				if missingIngredients(data, recipe) then
+					recipe = randomBakeable(data)
+				end
+				if oven.state == "idle" and hasStation(data, oven.model.Name) and recipe then
 					startBake(plot, oven, player, recipe)
 				end
 				say(label, "Baker")
