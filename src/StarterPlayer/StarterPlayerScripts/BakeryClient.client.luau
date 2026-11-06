@@ -14,6 +14,7 @@ local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local ItemBuilder = require(ReplicatedStorage:WaitForChild("ItemBuilder"))
+local Layout = require(ReplicatedStorage:WaitForChild("Layout"))
 
 local player = Players.LocalPlayer
 local plotsFolder = Workspace:WaitForChild("Plots")
@@ -375,8 +376,8 @@ end
 
 local function placedCount(itemId)
 	local count = 0
-	for _, placedId in state.Placed do
-		if placedId == itemId then
+	for _, entry in state.Placed do
+		if entry.Id == itemId then
 			count += 1
 		end
 	end
