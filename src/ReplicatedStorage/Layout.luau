@@ -51,30 +51,35 @@ end
 
 local itemShapes = {}
 
--- An item's size in cells and the centre of its parts, in its own space, where the
--- front is -Z. Unrotated, it is turned to face the door.
+-- An item's size in cells, its height, and the centre of its parts, in its own space,
+-- where the front is -Z. Unrotated, it is turned to face the door.
 function Layout.ItemShape(item)
 	local shape = itemShapes[item.Id]
 	if shape then
 		return shape
 	end
-	local minX, maxX, minZ, maxZ = math.huge, -math.huge, math.huge, -math.huge
+	local minX, maxX, minZ, maxZ, top = math.huge, -math.huge, math.huge, -math.huge, 0
 	for _, spec in item.Parts do
-		local halfX, halfZ
-		if spec.Kind == "Disc" or spec.Kind == "Ball" then
-			halfX, halfZ = spec.Diameter / 2, spec.Diameter / 2
+		-- Discs are cylinders stood upright, so their Height is vertical.
+		local halfX, halfZ, halfY
+		if spec.Kind == "Disc" then
+			halfX, halfZ, halfY = spec.Diameter / 2, spec.Diameter / 2, spec.Height / 2
+		elseif spec.Kind == "Ball" then
+			halfX, halfZ, halfY = spec.Diameter / 2, spec.Diameter / 2, spec.Diameter / 2
 		else
-			halfX, halfZ = spec.Size.X / 2, spec.Size.Z / 2
+			halfX, halfZ, halfY = spec.Size.X / 2, spec.Size.Z / 2, spec.Size.Y / 2
 		end
 		local x, z = spec.X or 0, spec.Z or 0
 		minX = math.min(minX, x - halfX)
 		maxX = math.max(maxX, x + halfX)
 		minZ = math.min(minZ, z - halfZ)
 		maxZ = math.max(maxZ, z + halfZ)
+		top = math.max(top, spec.Y + halfY)
 	end
 	shape = {
 		W = Layout.Cells(maxX - minX),
 		D = Layout.Cells(maxZ - minZ),
+		H = top,
 		CenterX = (minX + maxX) / 2,
 		CenterZ = (minZ + maxZ) / 2,
 		Facing = -Vector3.zAxis,
@@ -86,11 +91,11 @@ end
 
 -- The server measures each station when it starts and stores its size on it.
 function Layout.StationShape(station, instance)
-	local w, d = instance:GetAttribute("FootW"), instance:GetAttribute("FootD")
-	if not w or not d then
+	local w, d, h = instance:GetAttribute("FootW"), instance:GetAttribute("FootD"), instance:GetAttribute("FootH")
+	if not w or not d or not h then
 		return nil
 	end
-	return { W = w, D = d, CenterX = 0, CenterZ = 0, Facing = station.Facing, BaseYaw = 0 }
+	return { W = w, D = d, H = h, CenterX = 0, CenterZ = 0, Facing = station.Facing, BaseYaw = 0 }
 end
 
 local function turnedSize(shape, r)
@@ -180,6 +185,7 @@ local function describe(key, name, shape, entry, flat, needsFront)
 		Key = key,
 		Name = name,
 		Rect = rect,
+		Height = shape.H,
 		Facing = facing,
 		Flat = flat,
 		Front = needsFront and Layout.FrontRect(rect, facing) or nil,
