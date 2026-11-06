@@ -4,8 +4,8 @@ local ItemBuilder = {}
 -- Parts are welded to the first part. Callers anchor or weld that part.
 -- Parts are only solid when solid is true. A Disc lies flat like a plate on a table, and
 -- a Plate faces the front like a clock on a wall. A part with Light = range glows in its
--- own colour.
-function ItemBuilder.Build(definition, scale, cframe, solid)
+-- own colour. When paint is a Color3, parts with Paint = true take that colour instead.
+function ItemBuilder.Build(definition, scale, cframe, solid, paint)
 	local model = Instance.new("Model")
 	model.Name = definition.Name
 	local first
@@ -28,7 +28,7 @@ function ItemBuilder.Build(definition, scale, cframe, solid)
 			part.Size = spec.Size * scale
 			part.CFrame = cframe * offset
 		end
-		part.Color = spec.Color
+		part.Color = spec.Paint and paint or spec.Color
 		part.Material = spec.Material or Enum.Material.SmoothPlastic
 		part.Transparency = spec.Transparency or 0
 		part.CanCollide = solid == true
