@@ -274,9 +274,14 @@ tabLayout.Padding = UDim.new(0, 8)
 tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
 tabLayout.Parent = tabBar
 
+-- Tabs share the bar's width, up to 110 pixels each, so they fit on a small phone.
 local function showTabs(names, current, onPick)
 	for index, name in names do
-		local tab = button(name .. "Tab", UDim2.fromOffset(110, TAB_HEIGHT), UDim2.new(), TOP_LEFT, name == current and PINK or GREY, tabBar)
+		local size = UDim2.new(1 / #names, -8, 0, TAB_HEIGHT)
+		local tab = button(name .. "Tab", size, UDim2.new(), TOP_LEFT, name == current and PINK or GREY, tabBar)
+		local limit = Instance.new("UISizeConstraint")
+		limit.MaxSize = Vector2.new(110, TAB_HEIGHT)
+		limit.Parent = tab
 		tab.Text = name
 		tab.LayoutOrder = index
 		tab.ZIndex = 7
@@ -301,7 +306,8 @@ local function hideTabs()
 end
 
 local rowOrder = 0
--- actions is a list of { Text, Color, OnClick }. OnClick is nil for a plain label.
+-- actions is a list of { Text, Color, OnClick, TextColor }. OnClick is nil for a plain
+-- label, and TextColor is white unless given.
 local function addRow(title, detail, actions)
 	rowOrder += 1
 	local row = style(Instance.new("Frame"), "Row", UDim2.new(1, -12, 0, 62), UDim2.new(), TOP_LEFT, WHITE)
@@ -324,6 +330,7 @@ local function addRow(title, detail, actions)
 		local actionButton =
 			button("Action" .. index, UDim2.fromOffset(98, 48), UDim2.new(1, x, 0.5, 0), Vector2.new(1, 0.5), action.Color, row)
 		actionButton.Text = action.Text
+		actionButton.TextColor3 = action.TextColor or WHITE
 		actionButton.ZIndex = 7
 		actionButton.AutoButtonColor = action.OnClick ~= nil
 		if action.OnClick then
@@ -586,15 +593,146 @@ function panels.Bake()
 	end
 end
 
--- The Floor tab has everything that stands on the floor, and the Wall tab has wall pieces.
+-- Dark writing on pale buttons and white writing on dark ones, so prices stay readable.
+local function textOn(color)
+	return (0.299 * color.R + 0.587 * color.G + 0.114 * color.B) > 0.6 and BROWN or WHITE
+end
+
+-- Roughly where a piece stands, as seen from the door: "Front left", "Back", "Middle".
+local function whereIs(rect)
+	local bounds = Layout.Bounds(state.Expansion)
+	local center = Layout.Center(rect)
+	local across = (center.X - bounds.MinX) / (bounds.MaxX - bounds.MinX)
+	local deep = (center.Z - bounds.MinZ) / (bounds.MaxZ - bounds.MinZ)
+	local words = {}
+	if deep > 2 / 3 then
+		table.insert(words, "front")
+	elseif deep < 1 / 3 then
+		table.insert(words, "back")
+	end
+	if across > 2 / 3 then
+		table.insert(words, "right")
+	elseif across < 1 / 3 then
+		table.insert(words, "left")
+	end
+	local text = #words > 0 and table.concat(words, " ") or "middle"
+	return text:sub(1, 1):upper() .. text:sub(2)
+end
+
+-- Your display cases in a steady order, each with a numbered name and where it stands.
+local function paintableCases()
+	local keys = {}
+	for key, entry in state.Placed do
+		if Config.GetItem(entry.Id).Slots then
+			table.insert(keys, key)
+		end
+	end
+	table.sort(keys, function(a, b)
+		return (tonumber(a) or 0) < (tonumber(b) or 0)
+	end)
+	local counts, cases = {}, {}
+	for _, key in keys do
+		local entry = state.Placed[key]
+		local item = Config.GetItem(entry.Id)
+		counts[item.Id] = (counts[item.Id] or 0) + 1
+		local rect = Layout.Rect(Layout.ItemShape(item), entry)
+		table.insert(cases, { Key = key, Name = ("%s %d"):format(item.Name, counts[item.Id]), Where = whereIs(rect) })
+	end
+	return cases
+end
+
+-- The Paint tab lists everything that can be painted. Choosing one lists its colours, and
+-- paintChoice remembers which it is: { Target = paint target } or { CaseKey, Name }.
+local paintChoice = nil
+
+local function choosePaint(choice)
+	paintChoice = choice
+	setPanel("Decorate")
+end
+
+local function paintRows()
+	if paintChoice and paintChoice.CaseKey and not state.Placed[paintChoice.CaseKey] then
+		paintChoice = nil
+	end
+	if paintChoice then
+		local target, key = paintChoice.Target, paintChoice.CaseKey
+		local name, current, cost
+		if target then
+			name, current, cost = target.Name, state.Paint[target.Id] or target.Original, target.Coins
+		else
+			name, current, cost = paintChoice.Name, state.Placed[key].Paint or Config.CaseOriginalPaint, Config.CasePaintCoins
+		end
+		addRow("Painting: " .. name, "Pick a colour, or go back to the list", {
+			{
+				Text = "Back",
+				Color = BLUE,
+				OnClick = function()
+					choosePaint(nil)
+				end,
+			},
+		})
+		for _, paint in Config.Paints do
+			if not target or Config.CanPaint(target, paint) then
+				local isNow = paint.Id == current
+				local action = { Text = isNow and "Now" or (cost .. " coins"), Color = paint.Color, TextColor = textOn(paint.Color) }
+				if not isNow then
+					action.OnClick = function()
+						if target then
+							purchaseEvent:FireServer("Paint", target.Id, paint.Id)
+						else
+							purchaseEvent:FireServer("PaintCase", key, paint.Id)
+						end
+					end
+				end
+				addRow(paint.Name, isNow and "Its colour now" or ("Paint it %s"):format(paint.Name), { action })
+			end
+		end
+		return
+	end
+	for _, target in Config.PaintTargets do
+		local current = Config.GetPaint(state.Paint[target.Id] or target.Original)
+		addRow(target.Name, ("%s now. %d coins to repaint"):format(current.Name, target.Coins), {
+			{
+				Text = "Paint",
+				Color = BLUE,
+				OnClick = function()
+					choosePaint({ Target = target })
+				end,
+			},
+		})
+	end
+	if state.LuxuryOven then
+		addRow(Config.LuxuryOven.Name, "Gold finish, can't be repainted", {})
+	end
+	for _, case in paintableCases() do
+		local current = Config.GetPaint(state.Placed[case.Key].Paint or Config.CaseOriginalPaint)
+		addRow(case.Name, ("%s. %s now, %d coins to repaint"):format(case.Where, current.Name, Config.CasePaintCoins), {
+			{
+				Text = "Paint",
+				Color = BLUE,
+				OnClick = function()
+					choosePaint({ CaseKey = case.Key, Name = case.Name })
+				end,
+			},
+		})
+	end
+end
+
+-- Floor has everything that stands on the floor, Wall has wall pieces, and Paint colours
+-- the walls, oven and cases.
+local DECOR_TABS = { "Floor", "Wall", "Paint" }
 local decorTab = "Floor"
 
 function panels.Decorate()
 	panelTitle.Text = ("Decorate (Charm %d)"):format(state.Charm)
-	showTabs({ "Floor", "Wall" }, decorTab, function(name)
+	showTabs(DECOR_TABS, decorTab, function(name)
 		decorTab = name
-		setPanel("Decorate")
+		choosePaint(nil)
 	end)
+	if decorTab == "Paint" then
+		paintRows()
+		return
+	end
 	addRow("Move things", "Move or turn anything in your bakery, including the oven and counters", {
 		{
 			Text = "Move",
@@ -787,6 +925,10 @@ end
 setPanel = function(name)
 	if not state then
 		return
+	end
+	-- Opening a menu starts the Paint tab at its list, not partway through a choice.
+	if name ~= currentPanel then
+		paintChoice = nil
 	end
 	currentPanel = name
 	local open = name ~= nil
@@ -1218,17 +1360,18 @@ local function holdItem(itemId, key)
 	local plot = myPlot()
 	local item = Config.GetItem(itemId)
 	local shape = Layout.ItemShape(item)
-	local entry
+	local entry, paint
 	if key then
 		local saved = state.Placed[key]
 		entry = { X = saved.X, Z = saved.Z, R = saved.R, Y = saved.Y }
+		paint = saved.Paint and Config.GetPaint(saved.Paint)
 	elseif item.Wall then
 		local spot = pointInFront(plot)
 		entry = Layout.WallEntryAt(shape, Vector3.new(spot.X, WALL_START_HEIGHT, spot.Z), myBounds())
 	else
 		entry = Layout.EntryAt(shape, pointInFront(plot), 0, myBounds())
 	end
-	local ghost = makeGhost(ItemBuilder.Build(item, 1, CFrame.new(), false))
+	local ghost = makeGhost(ItemBuilder.Build(item, 1, CFrame.new(), false, paint and paint.Color))
 	hold({
 		itemId = itemId,
 		key = key,
