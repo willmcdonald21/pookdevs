@@ -779,7 +779,8 @@ local function buildPlaced(plot, data, key)
 	local entry = data.Placed[key]
 	local item = Config.GetItem(entry.Id)
 	local origin = Layout.CFrame(plot.floorTop, Layout.ItemShape(item), entry)
-	local model = ItemBuilder.Build(item, 1, origin, not item.Flat)
+	-- Wall pieces aren't solid, so nobody gets caught on them or stands on top of them.
+	local model = ItemBuilder.Build(item, 1, origin, not item.Flat and not item.Wall)
 	ItemBuilder.Anchor(model)
 	model.Name = "Placed_" .. key
 	if item.Sparkles then
@@ -827,9 +828,9 @@ local function nextPlacedKey(data)
 end
 
 -- "New" places an item from storage, "Move" moves a placed item or a station, and
--- "Store" puts a placed item back in storage. Every spot is checked here, whatever the
--- client's preview said.
-placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r)
+-- "Store" puts a placed item back in storage. Wall pieces also send y, their height.
+-- Every spot is checked here, whatever the client's preview said.
+placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 	local plot = playerPlots[player]
 	local data = PlayerData.Get(player)
 	if not plot or not data or type(id) ~= "string" then
@@ -849,7 +850,7 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r)
 		syncStats(player)
 		return
 	end
-	local entry = Layout.CleanEntry(x, z, r)
+	local entry = Layout.CleanEntry(x, z, r, y)
 	if not entry or (action ~= "New" and action ~= "Move") then
 		return
 	end
@@ -869,6 +870,11 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r)
 		key = id
 		thing = Layout.ItemThing(key, entry)
 	else
+		return
+	end
+	-- Only wall pieces have a height. Floor pieces and stations never do.
+	local wall = key ~= nil and Config.GetItem(entry.Id).Wall == true
+	if wall ~= (entry.Y ~= nil) then
 		return
 	end
 	local fits, reason = Layout.Check(thing, layoutThings(plot, data))
