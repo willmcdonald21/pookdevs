@@ -1,6 +1,6 @@
 # pookdevs: Bakery Tycoon
 
-A Roblox bakery tycoon set around a town square. Players bake treats from ingredients, stock display cases, sell to customers who shop on their own, and pack deliveries for coins and Sugar Stars. Ingredients come from a free delivery crate and the grocery store on the square. Coins and Stars pay for upgrades, recipes and decorations. Everything in a bakery, including the oven and counters, can be moved and turned on a grid of 1-stud squares.
+A Roblox bakery tycoon set around a town square. Players bake treats from ingredients, stock display cases, sell to customers who shop on their own, and pack deliveries for coins and Sugar Stars. Ingredients come from a free delivery crate and the grocery store on the square. Coins and Stars pay for upgrades, recipes and decorations. Everything in a bakery, including the oven and counters, can be moved and turned on a grid of 1-stud squares. Wall decorations, such as sconces, plants and paintings, hang on the back and side walls and have their own Wall tab in the Decorate menu.
 
 - **Place:** Bakery Tycoon, placeId 124037168545233
 - **Built in:** Roblox Studio, with Claude Code connected through the Studio MCP server
@@ -10,7 +10,7 @@ A Roblox bakery tycoon set around a town square. Players bake treats from ingred
 |---|---|---|
 | `src/ReplicatedStorage/Config.luau` | ReplicatedStorage › Config | Every tunable value: recipes, ingredients, upgrades, decorations, deliveries, Robux passes and products |
 | `src/ReplicatedStorage/ItemBuilder.luau` | ReplicatedStorage › ItemBuilder | Builds treats, ingredients and decorations from Config part lists |
-| `src/ReplicatedStorage/Layout.luau` | ReplicatedStorage › Layout | Placement rules for the floor grid, shared by the server and the decorating preview |
+| `src/ReplicatedStorage/Layout.luau` | ReplicatedStorage › Layout | Placement rules for the floor grid and the walls, shared by the server and the decorating preview |
 | `src/ServerScriptService/PlayerData.luau` | ServerScriptService › PlayerData | Saving and loading, with a session lock so two servers can't overwrite each other |
 | `src/ServerScriptService/PurchaseHandler.luau` | ServerScriptService › PurchaseHandler | Robux purchases. Each receipt is saved, so a retry never pays twice |
 | `src/ServerScriptService/BakerySystem.server.luau` | ServerScriptService › BakerySystem | Server game logic: plots, oven, ingredients, crates, grocery, cases, customers, deliveries, shop, helpers, hotbar |
