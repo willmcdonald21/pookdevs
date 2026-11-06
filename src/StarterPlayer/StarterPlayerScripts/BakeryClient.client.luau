@@ -944,6 +944,11 @@ local function floorTop(plot)
 	return floor.CFrame * CFrame.new(0, floor.Size.Y / 2, 0)
 end
 
+-- Your bakery's floor inside the walls, which grows when you expand it.
+local function myBounds()
+	return Layout.Bounds(state.Expansion)
+end
+
 local function allThings(plot)
 	local shapes = {}
 	for _, station in Layout.Stations do
@@ -977,20 +982,26 @@ local function markerPart(name, size, color, transparency, parent)
 	return part
 end
 
--- Grid lines on your floor, with the doorway that must stay clear tinted.
+-- Grid lines on your floor, with the doorway that must stay clear tinted. gridLevel is
+-- the bakery size they were drawn for.
+local gridLevel = nil
+
 local function showGrid(plot)
 	local top = floorTop(plot)
+	local bounds = myBounds()
+	gridLevel = state.Expansion
 	grid = Instance.new("Folder")
 	grid.Name = "DecorGrid"
-	local middleX = (Layout.MinX + Layout.MaxX) / 2
-	local middleZ = (Layout.MinZ + Layout.MaxZ) / 2
-	for column = 0, Layout.Columns do
-		local line = markerPart("Line", Vector3.new(0.06, 0.02, Layout.Rows), WHITE, 0.55, grid)
-		line.CFrame = top * CFrame.new(Layout.MinX + column, 0.02, middleZ)
+	local columns, rows = bounds.MaxX - bounds.MinX, bounds.MaxZ - bounds.MinZ
+	local middleX = (bounds.MinX + bounds.MaxX) / 2
+	local middleZ = (bounds.MinZ + bounds.MaxZ) / 2
+	for column = 0, columns do
+		local line = markerPart("Line", Vector3.new(0.06, 0.02, rows), WHITE, 0.55, grid)
+		line.CFrame = top * CFrame.new(bounds.MinX + column, 0.02, middleZ)
 	end
-	for row = 0, Layout.Rows do
-		local line = markerPart("Line", Vector3.new(Layout.Columns, 0.02, 0.06), WHITE, 0.55, grid)
-		line.CFrame = top * CFrame.new(middleX, 0.02, Layout.MinZ + row)
+	for row = 0, rows do
+		local line = markerPart("Line", Vector3.new(columns, 0.02, 0.06), WHITE, 0.55, grid)
+		line.CFrame = top * CFrame.new(middleX, 0.02, bounds.MinZ + row)
 	end
 	local entrance = Layout.Entrance
 	local doorwaySize = Vector3.new(entrance.MaxX - entrance.MinX, 0.02, entrance.MaxZ - entrance.MinZ)
@@ -1004,11 +1015,13 @@ end
 local function showWallGrid(plot)
 	local top = floorTop(plot)
 	local height = Layout.WallHeight
-	local corner = Vector3.new(Layout.MinX, 0, Layout.MinZ)
+	local bounds = myBounds()
+	local columns, rows = bounds.MaxX - bounds.MinX, bounds.MaxZ - bounds.MinZ
+	local corner = Vector3.new(bounds.MinX, 0, bounds.MinZ)
 	local walls = {
-		{ start = corner, along = Vector3.xAxis, length = Layout.Columns, facing = Vector3.zAxis },
-		{ start = corner, along = Vector3.zAxis, length = Layout.Rows, facing = Vector3.xAxis },
-		{ start = Vector3.new(Layout.MaxX, 0, Layout.MinZ), along = Vector3.zAxis, length = Layout.Rows, facing = -Vector3.xAxis },
+		{ start = corner, along = Vector3.xAxis, length = columns, facing = Vector3.zAxis },
+		{ start = corner, along = Vector3.zAxis, length = rows, facing = Vector3.xAxis },
+		{ start = Vector3.new(bounds.MaxX, 0, bounds.MinZ), along = Vector3.zAxis, length = rows, facing = -Vector3.xAxis },
 	}
 	wallGrid = Instance.new("Folder")
 	wallGrid.Name = "WallGrid"
@@ -1151,7 +1164,7 @@ local function refreshHeld()
 	local top = floorTop(plot)
 	held.ghost:PivotTo(Layout.CFrame(top, held.shape, held.entry) * held.base)
 	local thing = heldThing()
-	local ok, reason = Layout.Check(thing, allThings(plot))
+	local ok, reason = Layout.Check(thing, allThings(plot), myBounds())
 	held.ok = ok
 	updateMarker(top, thing, ok)
 	local color = ok and OK_COLOR or BLOCKED_COLOR
@@ -1211,9 +1224,9 @@ local function holdItem(itemId, key)
 		entry = { X = saved.X, Z = saved.Z, R = saved.R, Y = saved.Y }
 	elseif item.Wall then
 		local spot = pointInFront(plot)
-		entry = Layout.WallEntryAt(shape, Vector3.new(spot.X, WALL_START_HEIGHT, spot.Z))
+		entry = Layout.WallEntryAt(shape, Vector3.new(spot.X, WALL_START_HEIGHT, spot.Z), myBounds())
 	else
-		entry = Layout.EntryAt(shape, pointInFront(plot), 0)
+		entry = Layout.EntryAt(shape, pointInFront(plot), 0, myBounds())
 	end
 	local ghost = makeGhost(ItemBuilder.Build(item, 1, CFrame.new(), false))
 	hold({
@@ -1320,10 +1333,11 @@ startPlacing = function(itemId)
 	end
 end
 
--- Where the pointer meets the floor, or the back and side walls while a wall piece is
--- held. The point is in floor space, with Y the height above the floor.
+-- Where the pointer meets the floor, including the extra floor of a bigger bakery, or the
+-- back and side walls while a wall piece is held. The point is in floor space, with Y the
+-- height above the floor.
 local function surfacePointAt(plot, ray)
-	local surfaces = { plot.Floor }
+	local surfaces = { plot.Floor, plot:FindFirstChild("FloorExtension") }
 	if held and held.wall then
 		surfaces = {}
 		for _, name in WALL_NAMES do
@@ -1383,9 +1397,9 @@ local function moveHeldTo(point)
 	local current = held.entry
 	local entry
 	if held.wall then
-		entry = Layout.WallEntryAt(held.shape, point)
+		entry = Layout.WallEntryAt(held.shape, point, myBounds())
 	else
-		entry = Layout.EntryAt(held.shape, point, current.R)
+		entry = Layout.EntryAt(held.shape, point, current.R, myBounds())
 	end
 	if entry.X ~= current.X or entry.Z ~= current.Z or entry.R ~= current.R or entry.Y ~= current.Y then
 		held.entry = entry
@@ -1407,7 +1421,7 @@ local function rotateHeld()
 		placeBanner.Text = WALL_ROTATE_HINT
 		bannerHintUntil = os.clock() + BANNER_HINT_TIME
 	elseif held then
-		held.entry = Layout.Rotated(held.shape, held.entry)
+		held.entry = Layout.Rotated(held.shape, held.entry, myBounds())
 		refreshHeld()
 	elseif decorating then
 		placeBanner.Text = ROTATE_HINT
@@ -1549,6 +1563,18 @@ local function refreshDecorating()
 	finishPending()
 	if not decorating then
 		return
+	end
+	-- The bakery grew, so the grids are drawn again at the new size.
+	local plot = myPlot()
+	if plot and gridLevel ~= state.Expansion then
+		if grid then
+			grid:Destroy()
+		end
+		showGrid(plot)
+		if wallGrid then
+			hideWallGrid()
+			showWallGrid(plot)
+		end
 	end
 	if held and not held.stationId then
 		local gone = held.key ~= nil and state.Placed[held.key] == nil
