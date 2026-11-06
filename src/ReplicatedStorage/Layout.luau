@@ -32,7 +32,7 @@ Layout.Stations = {
 	{ Id = "Cookbook", Name = "Cookbook Counter", Path = "UpgradeStation", Facing = Vector3.zAxis },
 	{ Id = "Pantry", Name = "Pantry Shelf", Path = "PantryShelf", Facing = Vector3.xAxis },
 	{ Id = "Checkout", Name = "Checkout Counter", Path = "Checkout", Facing = Vector3.zAxis, NeedsFront = true },
-	{ Id = "Packing", Name = "Packing Table", Path = "PackingStation", Facing = Vector3.zAxis },
+	{ Id = "Packing", Name = "Delivery Counter", Path = "PackingStation", Facing = Vector3.zAxis },
 }
 
 function Layout.GetStation(id)
