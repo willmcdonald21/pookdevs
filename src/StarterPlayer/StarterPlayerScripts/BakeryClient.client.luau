@@ -522,6 +522,15 @@ end
 
 function panels.Decorate()
 	panelTitle.Text = ("Decorate (Charm %d)"):format(state.Charm)
+	addRow("Move things", "Move or turn anything in your bakery, including the oven and counters", {
+		{
+			Text = "Move",
+			Color = BLUE,
+			OnClick = function()
+				startPlacing(nil)
+			end,
+		},
+	})
 	for _, item in Config.Items do
 		if Config.IsAllowed(item, player.UserId) then
 			local owned = state.Owned[item.Id]
@@ -582,15 +591,6 @@ function panels.Decorate()
 			addRow(item.Name, detail, actions)
 		end
 	end
-	addRow("Move things", "Move or turn anything in your bakery, including the oven and counters", {
-		{
-			Text = "Move",
-			Color = BLUE,
-			OnClick = function()
-				startPlacing(nil)
-			end,
-		},
-	})
 end
 
 function panels.Deliveries()
