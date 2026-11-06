@@ -773,15 +773,10 @@ local function addCase(plot, key, model, origin, slots, promptParent, stand)
 end
 
 -- Placed items
-local function padOrigin(plot, spot)
-	local pad = plot.pads:FindFirstChild(tostring(spot))
-	return pad.CFrame * CFrame.new(0, -pad.Size.Y / 2, 0), pad
-end
-
-local function buildPlaced(plot, data, spot)
-	local key = tostring(spot)
-	local item = Config.GetItem(data.Placed[key])
-	local origin = padOrigin(plot, spot)
+local function buildPlaced(plot, data, key)
+	local entry = data.Placed[key]
+	local item = Config.GetItem(entry.Id)
+	local origin = Layout.CFrame(plot.floorTop, Layout.ItemShape(item), entry)
 	local model = ItemBuilder.Build(item, 1, origin, not item.Flat)
 	ItemBuilder.Anchor(model)
 	model.Name = "Placed_" .. key
@@ -792,56 +787,107 @@ local function buildPlaced(plot, data, spot)
 	end
 	model.Parent = plot.placedFolder
 	if item.Slots then
-		local stand = (origin * CFrame.new(0, 3.1, -4.5)).Position
+		local front = Layout.ItemThing(key, entry).Front
+		local stand = floorPoint(plot, Layout.Center(front), CUSTOMER_HEIGHT)
 		addCase(plot, key, model, origin, item.Slots, model.PrimaryPart, stand)
 		refreshCase(plot, data, key)
 	end
 end
 
-local function removePlaced(plot, data, key)
+-- Takes an item's model and case out of the bakery but leaves it in the save.
+local function unbuildPlaced(plot, key)
 	local case = plot.cases[key]
 	if case then
 		case.connection:Disconnect()
 		plot.cases[key] = nil
-		for _, recipeIndex in data.Stock[key] do
-			data.Tray[recipeIndex] += 1
-		end
-		data.Stock[key] = nil
 	end
 	local model = plot.placedFolder:FindFirstChild("Placed_" .. key)
 	if model then
 		model:Destroy()
 	end
+end
+
+local function storePlaced(plot, data, key)
+	unbuildPlaced(plot, key)
+	for _, recipeIndex in data.Stock[key] or {} do
+		data.Tray[recipeIndex] += 1
+	end
+	data.Stock[key] = nil
 	data.Placed[key] = nil
 end
 
-placeEvent.OnServerEvent:Connect(function(player, spot, itemId)
+local function nextPlacedKey(data)
+	local index = 1
+	while data.Placed[tostring(index)] or data.Stock[tostring(index)] do
+		index += 1
+	end
+	return tostring(index)
+end
+
+-- "New" places an item from storage, "Move" moves a placed item or a station, and
+-- "Store" puts a placed item back in storage. Every spot is checked here, whatever the
+-- client's preview said.
+placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r)
 	local plot = playerPlots[player]
 	local data = PlayerData.Get(player)
-	if not plot or not data or type(spot) ~= "number" or spot % 1 ~= 0 then
+	if not plot or not data or type(id) ~= "string" then
 		return
 	end
-	if spot < 1 or spot > Config.SpotCount then
-		return
-	end
-	local item
-	if itemId ~= nil then
-		item = type(itemId) == "string" and Config.GetItem(itemId)
-		if not item or placedCount(data, itemId) >= data.Owned[itemId] then
+	if action == "Store" then
+		local entry = data.Placed[id]
+		if not entry then
 			return
 		end
+		if Config.GetItem(entry.Id).Slots and placedCaseCount(data) <= 1 then
+			notify(player, "Keep at least one display case so customers can shop")
+		else
+			storePlaced(plot, data, id)
+			refreshHelpers(plot, data)
+		end
+		syncStats(player)
+		return
 	end
-	local key = tostring(spot)
-	if data.Placed[key] then
-		removePlaced(plot, data, key)
+	local entry = Layout.CleanEntry(x, z, r)
+	if not entry or (action ~= "New" and action ~= "Move") then
+		return
 	end
-	if item then
-		data.Placed[key] = item.Id
-		if item.Slots then
+	local key, thing
+	if action == "New" then
+		local item = Config.GetItem(id)
+		if not item or placedCount(data, id) >= data.Owned[id] then
+			return
+		end
+		entry.Id = id
+		key = nextPlacedKey(data)
+		thing = Layout.ItemThing(key, entry)
+	elseif plot.stations[id] then
+		thing = Layout.StationThing(Layout.GetStation(id), plot.stations[id].shape, entry)
+	elseif data.Placed[id] then
+		entry.Id = data.Placed[id].Id
+		key = id
+		thing = Layout.ItemThing(key, entry)
+	else
+		return
+	end
+	local fits, reason = Layout.Check(thing, layoutThings(plot, data))
+	if not fits then
+		notify(player, reason)
+		syncStats(player)
+		return
+	end
+	if not key then
+		data.Stations[id] = entry
+		moveStation(plot, id, entry)
+	else
+		if action == "Move" then
+			unbuildPlaced(plot, key)
+		elseif Config.GetItem(id).Slots then
 			data.Stock[key] = {}
 		end
-		buildPlaced(plot, data, spot)
+		data.Placed[key] = entry
+		buildPlaced(plot, data, key)
 	end
+	refreshHelpers(plot, data)
 	syncStats(player)
 end)
 
@@ -1626,9 +1672,10 @@ local function applyExclusiveItems(player, data)
 				and (not item.Pass or PurchaseHandler.OwnsPass(player, item.Pass))
 			data.Owned[item.Id] = allowed and 1 or 0
 			if not allowed then
-				for key, placedId in data.Placed do
-					if placedId == item.Id then
+				for key, entry in data.Placed do
+					if entry.Id == item.Id then
 						data.Placed[key] = nil
+						data.Stock[key] = nil
 					end
 				end
 			end
