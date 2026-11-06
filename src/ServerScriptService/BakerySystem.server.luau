@@ -1380,6 +1380,41 @@ local function walkCustomer(model, to)
 	model:SetAttribute("Walking", false)
 end
 
+local PATH_SETTINGS = { AgentRadius = 1.2, AgentHeight = 5, AgentCanJump = false, WaypointSpacing = math.huge }
+local PATH_GROUND = Vector3.new(0, CUSTOMER_HEIGHT - 0.5, 0)
+
+-- Walks around furniture inside the bakery. If there's no way through, walks straight.
+local function walkAround(model, to)
+	local path = PathfindingService:CreatePath(PATH_SETTINGS)
+	local ok = pcall(function()
+		path:ComputeAsync(model.PrimaryPart.Position - PATH_GROUND, to - PATH_GROUND)
+	end)
+	if ok and path.Status == Enum.PathStatus.Success then
+		local waypoints = path:GetWaypoints()
+		for index = 2, #waypoints do
+			if not model.Parent then
+				return
+			end
+			local point = waypoints[index].Position
+			walkCustomer(model, Vector3.new(point.X, to.Y, point.Z))
+		end
+	end
+	if model.Parent then
+		walkCustomer(model, to)
+	end
+end
+
+-- A spot along the front of the checkout counter, where customers pay.
+local function payPosition(plot, data)
+	local thing = stationThing(plot, data, "Checkout")
+	local front = thing.Front
+	local along = Vector3.new(thing.Facing.Z, 0, -thing.Facing.X)
+	local length = math.abs(along:Dot(Vector3.new(front.MaxX - front.MinX, 0, front.MaxZ - front.MinZ)))
+	local spread = math.clamp(length / 2 - 1.5, 0, 5)
+	local point = Layout.Center(front) + along * (math.random() * 2 - 1) * spread
+	return floorPoint(plot, point, CUSTOMER_HEIGHT)
+end
+
 local function say(label, text)
 	label.Text = text
 	label.Visible = true
@@ -1422,7 +1457,7 @@ local function runCustomer(plot, session)
 	local key = data and pickStockedCase(plot, data)
 	local recipe
 	if key then
-		walkCustomer(model, plot.cases[key].stand)
+		walkAround(model, plot.cases[key].stand)
 		if gone() then
 			model:Destroy()
 			return
@@ -1445,8 +1480,7 @@ local function runCustomer(plot, session)
 
 	if recipe then
 		say(label, ("Mmm, %s!"):format(recipe.Name:lower()))
-		local x = math.random(-50, 50) / 10
-		walkCustomer(model, plot.customerCounter.Position + plot.counterRight * x + Vector3.new(0, 3, 0))
+		walkAround(model, payPosition(plot, data))
 		if gone() then
 			model:Destroy()
 			return
@@ -1479,7 +1513,7 @@ local function runCustomer(plot, session)
 		model:Destroy()
 		return
 	end
-	walkCustomer(model, door)
+	walkAround(model, door)
 	if not gone() then
 		label.Visible = false
 		walkCustomer(model, start)
