@@ -170,20 +170,25 @@ for slot = 1, Config.HotbarSize do
 	hotbarSlots[slot] = { box = box, stroke = stroke, icon = icon, count = count, recipeIndex = 0 }
 end
 
+-- Shows a treat in a ViewportFrame, seen from a little above.
+local function showTreat(viewport, recipeIndex)
+	local model = ItemBuilder.Build(Config.Recipes[recipeIndex], 1, CFrame.new())
+	ItemBuilder.Anchor(model)
+	model.Parent = viewport
+	local center, extents = model:GetBoundingBox()
+	local camera = Instance.new("Camera")
+	camera.CFrame = CFrame.lookAt(center.Position + Vector3.new(0, 0.7, 1).Unit * extents.Magnitude * 1.15, center.Position)
+	camera.Parent = viewport
+	viewport.CurrentCamera = camera
+end
+
 local function setSlotIcon(entry, recipeIndex)
 	entry.recipeIndex = recipeIndex
 	entry.icon:ClearAllChildren()
 	if recipeIndex == 0 then
 		return
 	end
-	local model = ItemBuilder.Build(Config.Recipes[recipeIndex], 1, CFrame.new())
-	ItemBuilder.Anchor(model)
-	model.Parent = entry.icon
-	local center, extents = model:GetBoundingBox()
-	local camera = Instance.new("Camera")
-	camera.CFrame = CFrame.lookAt(center.Position + Vector3.new(0, 0.7, 1).Unit * extents.Magnitude * 1.15, center.Position)
-	camera.Parent = entry.icon
-	entry.icon.CurrentCamera = camera
+	showTreat(entry.icon, recipeIndex)
 end
 
 -- Sounds
@@ -2033,6 +2038,71 @@ for _, tag in { "Customer", "Helper" } do
 	end
 	CollectionService:GetInstanceAddedSignal(tag):Connect(watchCustomer)
 end
+
+-- A customer on their way to a bakery thinks of the treat they want: a white cloud with
+-- two small puffs trailing down to their head, sized in studs so it shrinks with distance.
+local function thoughtBubble(root, recipeIndex)
+	local bubble = Instance.new("BillboardGui")
+	bubble.Name = "Thought"
+	bubble.Size = UDim2.fromScale(3, 3)
+	bubble.StudsOffset = Vector3.new(1.2, 4.3, 0)
+	bubble.MaxDistance = 80
+	local function puff(size, position)
+		local circle = Instance.new("Frame")
+		circle.Size = size
+		circle.Position = position
+		circle.AnchorPoint = Vector2.new(0.5, 0.5)
+		circle.BackgroundColor3 = WHITE
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0.5, 0)
+		corner.Parent = circle
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = PINK
+		stroke.Thickness = 2
+		stroke.Parent = circle
+		circle.Parent = bubble
+		return circle
+	end
+	puff(UDim2.fromScale(0.12, 0.12), UDim2.fromScale(0.12, 0.94))
+	puff(UDim2.fromScale(0.2, 0.2), UDim2.fromScale(0.26, 0.78))
+	local cloud = puff(UDim2.fromScale(0.72, 0.72), UDim2.fromScale(0.6, 0.38))
+	local icon = Instance.new("ViewportFrame")
+	icon.Size = UDim2.fromScale(0.8, 0.8)
+	icon.Position = UDim2.fromScale(0.5, 0.5)
+	icon.AnchorPoint = Vector2.new(0.5, 0.5)
+	icon.BackgroundTransparency = 1
+	icon.Ambient = Color3.fromRGB(200, 200, 200)
+	icon.LightColor = WHITE
+	icon.Parent = cloud
+	showTreat(icon, recipeIndex)
+	bubble.Parent = root
+	return bubble
+end
+
+local function watchWants(model)
+	local root = model:WaitForChild("Torso", 5)
+	if not root then
+		return
+	end
+	local bubble
+	local function update()
+		if bubble then
+			bubble:Destroy()
+			bubble = nil
+		end
+		local recipeIndex = model:GetAttribute("Wants")
+		if recipeIndex and Config.Recipes[recipeIndex] then
+			bubble = thoughtBubble(root, recipeIndex)
+		end
+	end
+	model:GetAttributeChangedSignal("Wants"):Connect(update)
+	update()
+end
+
+for _, model in CollectionService:GetTagged("Customer") do
+	task.spawn(watchWants, model)
+end
+CollectionService:GetInstanceAddedSignal("Customer"):Connect(watchWants)
 
 RunService.RenderStepped:Connect(function()
 	local now = os.clock()
