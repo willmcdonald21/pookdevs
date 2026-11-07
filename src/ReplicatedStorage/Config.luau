@@ -955,19 +955,47 @@ end
 -- Customers keep buying from your cases while you're away, for up to this long.
 Config.OfflineMaxSeconds = 8 * 60 * 60
 
--- Customers
-Config.CustomerInterval = 9
-Config.CustomerMinInterval = 2.5
-Config.CharmSpeedBonus = 0.06
-Config.MaxCustomers = 5
+-- Customers. On average one arrives every CustomerInterval seconds, sped up by Charm and
+-- boosts, but never more often than every CustomerMinInterval.
+Config.CustomerInterval = 18
+Config.CustomerMinInterval = 3
+-- Charm speeds customers up by at most Max (0.5 is 50% faster). Charm of Half gets half of
+-- that, and each piece after that helps a little less.
+Config.CharmSpeed = { Max = 0.5, Half = 12 }
+-- How many customers can be on their way or inside at once, normally and during a boost.
+Config.MaxCustomers = 3
+Config.MaxCustomersBoosted = 5
 Config.CustomerSpeed = 8
 Config.BrowseTime = 1.5
 -- Golden customers wear a crown, pay PayScale times the price, and sometimes tip a Star.
 Config.GoldenCustomer = { Chance = 1 / 12, PayScale = 3, StarChance = 1 / 3 }
--- Customers arrive at random. The wait before the next one is the usual interval times a
--- random factor, mostly short with an occasional long lull, kept between Min and Max.
--- Sometimes two friends come at once (PairChance), and the waits stretch to make up for it.
-Config.CustomerGap = { Min = 0.3, Max = 2.5, PairChance = 0.15 }
+-- Customers arrive at random. Each wait is the usual interval times a factor from one of
+-- these kinds, picked by Weight. Sometimes friends come together: Groups gives the chance
+-- of a group of each size. Waits are evened out so the average still matches the interval.
+Config.CustomerGap = {
+	Kinds = {
+		-- Right behind the last customer.
+		{ Weight = 15, Factor = { 0.15, 0.4 } },
+		{ Weight = 65, Factor = { 0.5, 1.5 } },
+		-- A quiet spell.
+		{ Weight = 20, Factor = { 2, 4 } },
+	},
+	Groups = { [2] = 0.12, [3] = 0.03 },
+}
+
+-- Boosts. Each adds its Rush to how fast customers come: 0.5 is 50% more customers. They
+-- add together, and while any is on, up to MaxCustomersBoosted can come at once.
+-- A Bake Sale is free once every Cooldown seconds. For Duration seconds, customers pay
+-- Discount less (0.25 is 25% off). Deliveries and offline sales aren't discounted.
+Config.BakeSale = { Duration = 120, Cooldown = 60 * 60, Discount = 0.25, Rush = 0.5 }
+-- Bakery Buzz costs Stars for Minutes of customers. Buying again adds more time.
+Config.Buzz = { Stars = 3, Minutes = 5, Rush = 1 }
+-- The 2x Boost product also brings this many more customers while it lasts.
+Config.BoostRush = 1
+-- A stand outside the door gives a stack of Stack flyers, and the next stack is ready
+-- Restock seconds after taking one. Townsfolk within Reach studs of the owner take one and
+-- head to the bakery, at most one every Gap seconds.
+Config.Flyers = { Stack = 5, Restock = 180, Reach = 8, Gap = 1 }
 -- A customer who gets the treat they wanted tips a random share of its price, from Min to Max.
 Config.WantedTip = { Min = 0, Max = 0.25 }
 
