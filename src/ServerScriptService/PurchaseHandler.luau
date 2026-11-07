@@ -75,11 +75,14 @@ function PurchaseHandler.OwnedPasses(player)
 end
 
 -- Asks Roblox which passes the player owns. A pass that can't be checked counts as
--- not owned until the next visit.
+-- not owned until the next visit. Accounts in Config.FreePasses own every pass.
 function PurchaseHandler.LoadPasses(player)
+	local free = table.find(Config.FreePasses, player.UserId) ~= nil
 	local owned = {}
 	for _, pass in Config.Passes do
-		if pass.GamePassId ~= 0 then
+		if free then
+			owned[pass.Id] = true
+		elseif pass.GamePassId ~= 0 then
 			local ok, result = pcall(function()
 				return MarketplaceService:UserOwnsGamePassAsync(player.UserId, pass.GamePassId)
 			end)
