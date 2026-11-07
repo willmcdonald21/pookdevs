@@ -41,6 +41,9 @@ local function withRetries(action)
 	return false, result
 end
 
+-- Coins spent on Comfy Shoes by each level, from the Shop's last prices.
+local SHOES_REFUNDS = { 0, 40, 340, 1840 }
+
 local function cleanLevel(value, max)
 	return math.clamp(math.floor(tonumber(value) or 1), 1, max)
 end
@@ -201,6 +204,14 @@ local function clean(saved)
 	for _, upgrade in Config.Upgrades do
 		local key = upgrade.Id .. "Level"
 		data[key] = cleanLevel(saved[key], #upgrade.Levels)
+	end
+	-- Comfy Shoes left the Shop when running became free for everyone. Anyone who bought
+	-- them gets those coins back. ShoesLevel isn't saved any more, so this happens once.
+	-- ShoesRefund isn't saved either: it's only there to tell the player.
+	local shoesRefund = SHOES_REFUNDS[cleanLevel(saved.ShoesLevel, #SHOES_REFUNDS)]
+	if shoesRefund > 0 then
+		data.Coins += shoesRefund
+		data.ShoesRefund = shoesRefund
 	end
 	local savedTray = type(saved.Tray) == "table" and saved.Tray or {}
 	for index in Config.Recipes do
