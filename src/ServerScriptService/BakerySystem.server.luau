@@ -1578,8 +1578,8 @@ local function showSaleBanner(plot, on)
 		local banner = Instance.new("BillboardGui")
 		banner.Name = "SaleBanner"
 		-- Scale sizes on a BillboardGui are in studs.
-		banner.Size = UDim2.fromScale(15, 3)
-		banner.StudsOffset = Vector3.new(0, 4.4, 0)
+		banner.Size = UDim2.fromScale(20, 3.4)
+		banner.StudsOffset = Vector3.new(0, 4.6, 0)
 		banner.LightInfluence = 0
 		banner.MaxDistance = 250
 		local label = Instance.new("TextLabel")
