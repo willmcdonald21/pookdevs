@@ -26,6 +26,11 @@ These can be bought again and again.
 | Star Chest | 199 | 3728575858 | 100 Sugar Stars |
 | 2x Boost | 25 | 3728575863 | Double coins for 15 minutes. Buying again adds 15 more |
 
+## Icons
+Every pass and product has its own icon, a round badge with a pink frosting rim. They were uploaded through Open Cloud on 2026-11-07, replacing Roblox's grey stock icons, and nothing else on the items changed. The drawings are in `art/store/`: `build_icons.py` writes each SVG and renders it to the PNG that was uploaded. The in-game Get More menu shows whatever icon Roblox has for each item, so a new icon set in Creator Hub appears in the game as well. Roblox reviews each new image first, and until it's approved, players see a grey placeholder.
+
+To change an icon, edit its drawing in `build_icons.py` and run `python3 art/store/build_icons.py`. Then upload the PNG in Creator Hub: open the pass or product, choose its image, and save. Or have Claude upload it with an API key that has write access for **game-passes** and **developer-products**.
+
 ## Creating more later
 1. Create an Open Cloud API key with the **game-pass** and **developer-product** APIs, each with read and write access, limited to Sweetopia and your IP address. Saving changes to a key's permissions may generate a new key.
 2. Give the key to Claude through the clipboard, not in chat. Delete the key in Creator Hub when finished.
