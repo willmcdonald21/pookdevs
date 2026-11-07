@@ -910,7 +910,7 @@ Config.Products = {
 	{ Name = "2x Boost", ProductId = 3728575863, Currency = "Boost", Amount = 15 },
 }
 
--- Daily reward streak (days count in UTC). Missing a day starts again at day 1.
+-- Daily reward streak (each day starts at midnight US Eastern time). Missing a day starts again at day 1.
 Config.DailyRewards = {
 	{ Coins = 100 },
 	{ Coins = 200 },
