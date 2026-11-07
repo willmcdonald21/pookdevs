@@ -32,6 +32,8 @@ local claimDailyEvent = ReplicatedStorage:WaitForChild("ClaimDaily")
 local claimGoalEvent = ReplicatedStorage:WaitForChild("ClaimGoal")
 local unpackCrateEvent = ReplicatedStorage:WaitForChild("UnpackCrate")
 local buyGroceriesEvent = ReplicatedStorage:WaitForChild("BuyGroceries")
+local startBakeSaleEvent = ReplicatedStorage:WaitForChild("StartBakeSale")
+local takeFlyersEvent = ReplicatedStorage:WaitForChild("TakeFlyers")
 
 local PINK = Color3.fromRGB(240, 150, 175)
 local BROWN = Color3.fromRGB(90, 60, 70)
@@ -101,6 +103,8 @@ local deliveryButton = button("DeliveryButton", UDim2.fromOffset(120, 44), UDim2
 deliveryButton.Text = "Deliveries"
 local cookbookButton = button("CookbookButton", UDim2.fromOffset(120, 44), UDim2.fromOffset(10, 222), TOP_LEFT, BLUE)
 cookbookButton.Text = "Cookbook"
+local boostButton = button("BoostButton", UDim2.fromOffset(120, 44), UDim2.fromOffset(10, 270), TOP_LEFT, BLUE)
+boostButton.Text = "Boosts"
 local storeButton = button("StoreButton", UDim2.fromOffset(44, 68), UDim2.fromOffset(134, 6), TOP_LEFT, GREEN)
 storeButton.Text = "+"
 local hintLabel = label("Hint", UDim2.new(0.5, 0, 0, 32), UDim2.new(0.5, 0, 0, 6), TOP_CENTER, CREAM, BROWN)
@@ -342,6 +346,7 @@ local function addRow(title, detail, actions)
 			actionButton.Activated:Connect(action.OnClick)
 		end
 	end
+	return row
 end
 
 local function addHeader(text)
@@ -386,6 +391,47 @@ end
 local function salePrice(recipe)
 	local bonus = Config.GetUpgrade("Ingredients").Levels[state.Levels.Ingredients].PriceBonus
 	return math.floor(recipe.Price * (1 + bonus))
+end
+
+-- Boosts. Their times count down here from the server's clock.
+local function secondsUntil(time)
+	return math.max(0, math.ceil(time - Workspace:GetServerTimeNow()))
+end
+
+local function clockText(seconds)
+	return ("%d:%02d"):format(seconds // 60, seconds % 60)
+end
+
+local function bakeSaleLeft()
+	return secondsUntil(state.BakeSaleAt + Config.BakeSale.Duration)
+end
+
+local function bakeSaleReadyIn()
+	return secondsUntil(state.BakeSaleAt + Config.BakeSale.Cooldown)
+end
+
+-- How many times the usual number of customers are coming, worked out as the server does.
+local function rushNow()
+	local rush = 1
+	if bakeSaleLeft() > 0 then
+		rush += Config.BakeSale.Rush
+	end
+	if secondsUntil(state.BuzzUntil) > 0 then
+		rush += Config.Buzz.Rush
+	end
+	if secondsUntil(state.BoostUntil) > 0 then
+		rush += Config.BoostRush
+	end
+	return rush
+end
+
+-- What customers pay, and true during a Bake Sale, when it's less.
+local function customerPrice(recipe)
+	local price = salePrice(recipe)
+	if bakeSaleLeft() > 0 then
+		return math.max(1, math.floor(price * (1 - Config.BakeSale.Discount))), true
+	end
+	return price, false
 end
 
 local function trayTotal()
@@ -481,7 +527,12 @@ function panels.Cookbook()
 	panelTitle.Text = "Cookbook"
 	addHeader("Recipes")
 	for index, recipe in Config.Recipes do
-		local detail = ("Sells for %d coins. Uses %s"):format(salePrice(recipe), Config.DescribeIngredients(recipe.Ingredients))
+		local price, onSale = customerPrice(recipe)
+		local detail = ("%s %d coins. Uses %s"):format(
+			onSale and "On sale for" or "Sells for",
+			price,
+			Config.DescribeIngredients(recipe.Ingredients)
+		)
 		if index <= state.RecipesUnlocked then
 			addRow(recipe.Name, detail, { { Text = "Unlocked", Color = PINK } })
 		elseif index == state.RecipesUnlocked + 1 then
@@ -565,7 +616,8 @@ function panels.Bake()
 	addRow("Your pantry", pantrySummary(), {})
 	for index = 1, state.RecipesUnlocked do
 		local recipe = Config.Recipes[index]
-		local title = ("%s: %d in %.1fs, %d coins each"):format(recipe.Name, batch, ovenTime * recipe.BakeScale, salePrice(recipe))
+		local title =
+			("%s: %d in %.1fs, %d coins each"):format(recipe.Name, batch, ovenTime * recipe.BakeScale, (customerPrice(recipe)))
 		local missing = missingIngredients(recipe)
 		if missing then
 			addRow(title, "Missing " .. missing, { { Text = "Need more", Color = GREY } })
@@ -907,7 +959,7 @@ end
 
 local function productDetail(product)
 	if product.Currency == "Boost" then
-		local detail = ("Double coins for %d minutes"):format(product.Amount)
+		local detail = ("Double coins and customers for %d minutes"):format(product.Amount)
 		local left = state.BoostUntil - Workspace:GetServerTimeNow()
 		if left > 0 then
 			detail ..= (" (%d min left)"):format(math.ceil(left / 60))
@@ -943,6 +995,128 @@ function panels.Store()
 			buyProduct(product)
 		end)
 		addRow(product.Name, productDetail(product), { action })
+	end
+end
+
+-- Rows in the Boosts menu whose text counts down, each with a function giving its text.
+local boostLive = {}
+local boostPhase = nil
+
+-- Changes when the Boosts menu needs different buttons, not just new times.
+local function currentBoostPhase()
+	local sale = bakeSaleLeft() > 0 and "On" or bakeSaleReadyIn() > 0 and "Wait" or "Ready"
+	local flyers = state.Flyers > 0 and "Have" or secondsUntil(state.FlyersReadyAt) > 0 and "Wait" or "Ready"
+	return ("%s %s %g"):format(sale, flyers, rushNow())
+end
+
+local function timeLeftText(text, untilTime)
+	local left = secondsUntil(untilTime)
+	return left > 0 and ("%s. On: %s left"):format(text, clockText(left)) or text
+end
+
+function panels.Boosts()
+	panelTitle.Text = "Boosts"
+	table.clear(boostLive)
+	boostPhase = currentBoostPhase()
+	local function live(object, text)
+		object.Text = text()
+		table.insert(boostLive, { object = object, text = text })
+	end
+
+	local customersRow = addRow("Customers", "", {})
+	live(customersRow.Detail, function()
+		local rush = rushNow()
+		return rush > 1 and ("%gx as many as usual right now"):format(rush) or "As many as usual. Boosts bring more"
+	end)
+
+	local sale = Config.BakeSale
+	local saleDetail = ("%d%% off and %d%% more customers for %d min, once an hour"):format(
+		math.floor(sale.Discount * 100 + 0.5),
+		math.floor(sale.Rush * 100 + 0.5),
+		sale.Duration // 60
+	)
+	local saleAction
+	if bakeSaleLeft() > 0 then
+		saleAction = { Text = "", Color = PINK }
+	elseif bakeSaleReadyIn() > 0 then
+		saleAction = { Text = "", Color = GREY }
+	else
+		saleAction = {
+			Text = "Start",
+			Color = GREEN,
+			OnClick = function()
+				startBakeSaleEvent:FireServer()
+			end,
+		}
+	end
+	local saleRow = addRow("Bake Sale", saleDetail, { saleAction })
+	if not saleAction.OnClick then
+		live(saleRow.Action1, function()
+			local left = bakeSaleLeft()
+			if left > 0 then
+				return clockText(left) .. " left"
+			end
+			return ("In %d min"):format(math.ceil(bakeSaleReadyIn() / 60))
+		end)
+	end
+
+	local flyerWait = secondsUntil(state.FlyersReadyAt)
+	local flyerColor = state.Flyers > 0 and PINK or flyerWait > 0 and GREY or GREEN
+	local flyerRow = addRow("Flyers", "", { { Text = "", Color = flyerColor } })
+	live(flyerRow.Detail, function()
+		if state.Flyers > 0 then
+			return "Walk near people on the plaza to hand them out"
+		elseif secondsUntil(state.FlyersReadyAt) > 0 then
+			return "A new stack is coming to the stand outside your door"
+		end
+		return ("Take a stack of %d from the stand outside your door"):format(Config.Flyers.Stack)
+	end)
+	live(flyerRow.Action1, function()
+		if state.Flyers > 0 then
+			return ("%d left"):format(state.Flyers)
+		end
+		local wait = secondsUntil(state.FlyersReadyAt)
+		return wait > 0 and clockText(wait) or "Ready"
+	end)
+
+	local buzzRow = addRow("Bakery Buzz", "", {
+		{
+			Text = starText(Config.Buzz.Stars),
+			Color = state.Stars >= Config.Buzz.Stars and GOLD or GREY,
+			OnClick = function()
+				purchaseEvent:FireServer("Buzz")
+			end,
+		},
+	})
+	live(buzzRow.Detail, function()
+		return timeLeftText(("Twice the customers for %d min"):format(Config.Buzz.Minutes), state.BuzzUntil)
+	end)
+
+	for _, product in Config.Products do
+		if product.Currency == "Boost" then
+			local action = robuxAction(product.ProductId, productPrices[product.ProductId], GOLD, function()
+				buyProduct(product)
+			end)
+			local boostRow = addRow(product.Name, "", { action })
+			live(boostRow.Detail, function()
+				return timeLeftText(("Double coins and customers for %d min"):format(product.Amount), state.BoostUntil)
+			end)
+		end
+	end
+end
+
+-- The Boosts button counts down while a boost is on, and is green when a Bake Sale is ready.
+local function refreshBoostButton()
+	if rushNow() > 1 then
+		local ends = math.max(bakeSaleLeft(), secondsUntil(state.BuzzUntil), secondsUntil(state.BoostUntil))
+		boostButton.Text = "Rush " .. clockText(ends)
+		boostButton.BackgroundColor3 = GOLD
+	elseif bakeSaleReadyIn() == 0 then
+		boostButton.Text = "Boosts!"
+		boostButton.BackgroundColor3 = GREEN
+	else
+		boostButton.Text = "Boosts"
+		boostButton.BackgroundColor3 = BLUE
 	end
 end
 
@@ -999,6 +1173,29 @@ storeButton.Activated:Connect(function()
 end)
 cookbookButton.Activated:Connect(function()
 	togglePanel("Cookbook")
+end)
+boostButton.Activated:Connect(function()
+	togglePanel("Boosts")
+end)
+
+-- Once a second, boost times count down on the button and in the Boosts menu. The menu is
+-- only rebuilt when its buttons change, so a tap on one isn't lost.
+task.spawn(function()
+	while true do
+		task.wait(1)
+		if state then
+			refreshBoostButton()
+			if currentPanel == "Boosts" then
+				if currentBoostPhase() ~= boostPhase then
+					refreshPanel()
+				else
+					for _, entry in boostLive do
+						entry.object.Text = entry.text()
+					end
+				end
+			end
+		end
+	end
 end)
 closeButton.Activated:Connect(function()
 	setPanel(nil)
@@ -1800,6 +1997,7 @@ stateEvent.OnClientEvent:Connect(function(newState)
 	end
 	cookbookButton.BackgroundColor3 = cookbookReady and GREEN or BLUE
 	cookbookButton.Text = cookbookReady and "Cookbook!" or "Cookbook"
+	refreshBoostButton()
 	for slot, entry in hotbarSlots do
 		local recipeIndex = state.Hotbar[slot]
 		if recipeIndex ~= entry.recipeIndex then
@@ -1941,6 +2139,10 @@ local function watchPrompt(prompt)
 	if prompt:GetAttribute("Action") == "UnpackCrate" then
 		prompt.Triggered:Connect(function()
 			unpackCrateEvent:FireServer()
+		end)
+	elseif prompt:GetAttribute("Action") == "TakeFlyers" then
+		prompt.Triggered:Connect(function()
+			takeFlyersEvent:FireServer()
 		end)
 	end
 end
