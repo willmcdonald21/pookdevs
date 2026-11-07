@@ -20,6 +20,7 @@ Normal times were far too busy. A decorated bakery got a customer every 2–4 se
 
 **Flyers** (free)
 - A flyer stand sits outside your door, across the path from the ingredient crate. Take a stack of 5.
+- You carry the stack in your right hand, one sheet for each flyer left, until you run out.
 - Walk onto the plaza. Anyone strolling within a few steps of you takes a flyer, says "Ooh, I'll take a look!", and walks to your bakery. You hand out at most one a second.
 - A new stack is ready 3 minutes after you take one, and the stand counts down.
 
