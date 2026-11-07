@@ -96,6 +96,30 @@ local function coinMultiplier(player, data)
 	return multiplier
 end
 
+local function bakeSaleOn(data)
+	return os.time() < data.BakeSaleAt + Config.BakeSale.Duration
+end
+
+-- How fast customers come: 1 normally, plus each boost's Rush while it's on.
+local function rushPower(data)
+	local now = os.time()
+	local power = 1
+	if bakeSaleOn(data) then
+		power += Config.BakeSale.Rush
+	end
+	if data.BuzzUntil > now then
+		power += Config.Buzz.Rush
+	end
+	if data.BoostUntil > now then
+		power += Config.BoostRush
+	end
+	return power
+end
+
+local function maxVisitors(data)
+	return rushPower(data) > 1 and Config.MaxCustomersBoosted or Config.MaxCustomers
+end
+
 local function earn(player, data, amount)
 	local coins = amount * coinMultiplier(player, data)
 	data.Coins += coins
@@ -645,6 +669,7 @@ local function syncStats(player)
 		Passes = PurchaseHandler.OwnedPasses(player),
 		Multiplier = coinMultiplier(player, data),
 		BoostUntil = data.BoostUntil,
+		Rush = rushPower(data),
 		Goals = data.Goals.List,
 		Owned = data.Owned,
 		Placed = data.Placed,
@@ -2096,31 +2121,76 @@ local function setUpTown()
 	end
 end
 
+-- The average gap between customers without boosts. Charm shortens it, by less for each
+-- piece, up to CharmSpeed.Max.
 local function customerInterval(data)
-	local speed = 1 + totalCharm(data) * Config.CharmSpeedBonus
-	return math.max(Config.CustomerMinInterval, Config.CustomerInterval / speed)
+	local charm = totalCharm(data)
+	local speed = 1 + Config.CharmSpeed.Max * charm / (charm + Config.CharmSpeed.Half)
+	return Config.CustomerInterval / speed
 end
 
--- Mostly short waits with the odd long lull: a random factor that averages about 1, kept
--- between CustomerGap.Min and Max.
-local function customerGap()
-	return math.clamp(-math.log(1 - math.random()), Config.CustomerGap.Min, Config.CustomerGap.Max)
+-- The average wait factor and group size, used to even out waits so that customers still
+-- come once per interval on average.
+local GAP_WEIGHT, GAP_AVERAGE, GROUP_AVERAGE = 0, 0, 1
+for _, kind in Config.CustomerGap.Kinds do
+	GAP_WEIGHT += kind.Weight
+	GAP_AVERAGE += kind.Weight * (kind.Factor[1] + kind.Factor[2]) / 2
 end
+GAP_AVERAGE /= GAP_WEIGHT
+for size, chance in Config.CustomerGap.Groups do
+	GROUP_AVERAGE += chance * (size - 1)
+end
+
+-- A random wait factor from one of the CustomerGap kinds: right behind the last customer, a
+-- usual wait, or a quiet spell. It stretches to make up for groups.
+local function customerGap()
+	local kinds = Config.CustomerGap.Kinds
+	local roll = math.random() * GAP_WEIGHT
+	for index, kind in kinds do
+		roll -= kind.Weight
+		if roll <= 0 or index == #kinds then
+			return randomBetween(kind.Factor) * GROUP_AVERAGE / GAP_AVERAGE
+		end
+	end
+	return 1
+end
+
+-- How many friends arrive together, usually 1.
+local function groupSize()
+	local roll = math.random()
+	for size, chance in Config.CustomerGap.Groups do
+		roll -= chance
+		if roll < 0 then
+			return size
+		end
+	end
+	return 1
+end
+
+-- Every SPAWN_STEP seconds the bakery gets a step closer to its next customer, with bigger
+-- steps during boosts, so a boost brings people straight away. The first customer comes a
+-- few seconds after the owner arrives.
+local SPAWN_STEP = 0.5
+local FIRST_CUSTOMER_HEAD_START = 0.7
 
 local function runCustomerSpawner(plot, session, player)
-	while plot.session == session do
-		local arriving = math.random() < Config.CustomerGap.PairChance and 2 or 1
-		for _ = 1, arriving do
-			if plot.visitors < Config.MaxCustomers then
-				requestCustomer(plot, session)
-			end
-		end
+	local progress, gap = FIRST_CUSTOMER_HEAD_START, 1
+	while true do
+		task.wait(SPAWN_STEP)
 		local data = PlayerData.Get(player)
-		if not data then
+		if plot.session ~= session or not data then
 			return
 		end
-		-- Waits stretch a little to make up for pairs, so customers come as often as before.
-		task.wait(customerInterval(data) * customerGap() * (1 + Config.CustomerGap.PairChance))
+		local interval = math.max(Config.CustomerMinInterval, customerInterval(data) / rushPower(data))
+		progress += SPAWN_STEP / (interval * gap)
+		if progress >= 1 then
+			progress, gap = 0, customerGap()
+			for _ = 1, groupSize() do
+				if plot.visitors < maxVisitors(data) then
+					requestCustomer(plot, session)
+				end
+			end
+		end
 	end
 end
 
