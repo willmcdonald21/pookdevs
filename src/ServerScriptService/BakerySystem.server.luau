@@ -2333,7 +2333,9 @@ end
 local function buildFlyerStand(plot)
 	local model = Instance.new("Model")
 	model.Name = "FlyerStand"
-	local base = plot.flyerSpot
+	-- It stands on the ground outside, which is lower than the bakery floor.
+	local spot = plot.flyerSpot
+	local base = spot + Vector3.new(0, groundPoint(spot.Position).Y - CUSTOMER_HEIGHT - spot.Position.Y, 0)
 	local top = flyerPart("Top", Vector3.new(3, 0.3, 2), base * CFrame.new(0, 2.6, 0), FLYER_WOOD, Enum.Material.WoodPlanks, model)
 	top.CanCollide = true
 	model.PrimaryPart = top
