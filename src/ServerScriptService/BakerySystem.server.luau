@@ -673,7 +673,6 @@ local function syncStats(player)
 		BoostUntil = data.BoostUntil,
 		BakeSaleAt = data.BakeSaleAt,
 		BuzzUntil = data.BuzzUntil,
-		Rush = rushPower(data),
 		Flyers = plot and plot.flyers or 0,
 		FlyersReadyAt = plot and plot.flyersReadyAt or 0,
 		Goals = data.Goals.List,
