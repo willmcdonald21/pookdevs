@@ -62,6 +62,7 @@ local claimGoalEvent = remote("ClaimGoal")
 local unpackCrateEvent = remote("UnpackCrate")
 local buyGroceriesEvent = remote("BuyGroceries")
 local startBakeSaleEvent = remote("StartBakeSale")
+local takeFlyersEvent = remote("TakeFlyers")
 
 local plots = {}
 local playerPlots = {}
@@ -672,6 +673,8 @@ local function syncStats(player)
 		BoostUntil = data.BoostUntil,
 		BakeSaleAt = data.BakeSaleAt,
 		Rush = rushPower(data),
+		Flyers = plot and plot.flyers or 0,
+		FlyersReadyAt = plot and plot.flyersReadyAt or 0,
 		Goals = data.Goals.List,
 		Owned = data.Owned,
 		Placed = data.Placed,
@@ -2297,6 +2300,189 @@ local function runCustomerSpawner(plot, session, player)
 	end
 end
 
+-- Flyers. The owner takes a stack from the stand outside the door, and townsfolk who come
+-- near them on the plaza take one and head to the bakery.
+local FLYER_COLOR = Color3.fromRGB(255, 170, 200)
+local FLYER_WOOD = Color3.fromRGB(190, 140, 90)
+local FLYER_LEG_WOOD = Color3.fromRGB(150, 100, 65)
+local FLYER_SAYING = "Ooh, I'll take a look!"
+local FLYER_FULL_HINT_GAP = 10
+
+local function flyerPart(name, size, cframe, color, material, parent)
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Anchored = true
+	part.CanCollide = false
+	part.Size = size
+	part.CFrame = cframe
+	part.Color = color
+	part.Material = material
+	part.Parent = parent
+	return part
+end
+
+-- A little wooden table with a pink stack of flyers on it.
+local function buildFlyerStand(plot)
+	local model = Instance.new("Model")
+	model.Name = "FlyerStand"
+	local base = plot.flyerSpot
+	local top = flyerPart("Top", Vector3.new(3, 0.3, 2), base * CFrame.new(0, 2.6, 0), FLYER_WOOD, Enum.Material.WoodPlanks, model)
+	top.CanCollide = true
+	model.PrimaryPart = top
+	for _, x in { -1.3, 1.3 } do
+		for _, z in { -0.8, 0.8 } do
+			flyerPart("Leg", Vector3.new(0.3, 2.45, 0.3), base * CFrame.new(x, 1.225, z), FLYER_LEG_WOOD, Enum.Material.Wood, model)
+		end
+	end
+	local stack = flyerPart("Stack", Vector3.new(1.6, 0.35, 1.15), base * CFrame.new(0, 2.925, 0), FLYER_COLOR, Enum.Material.SmoothPlastic, model)
+	-- A few loose flyers at angles, so it reads as paper.
+	for index, angle in { -12, 8, 20 } do
+		flyerPart(
+			"Sheet",
+			Vector3.new(1.6, 0.05, 1.15),
+			stack.CFrame * CFrame.new(0, 0.2 + index * 0.03, 0) * CFrame.Angles(0, math.rad(angle), 0),
+			index == 2 and Color3.fromRGB(255, 250, 240) or FLYER_COLOR,
+			Enum.Material.SmoothPlastic,
+			model
+		)
+	end
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "Label"
+	billboard.Size = UDim2.fromOffset(170, 44)
+	billboard.StudsOffset = Vector3.new(0, 2.6, 0)
+	billboard.MaxDistance = 60
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundColor3 = Color3.fromRGB(255, 250, 240)
+	label.TextColor3 = Color3.fromRGB(90, 60, 70)
+	label.Font = Enum.Font.FredokaOne
+	label.TextScaled = true
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.3, 0)
+	corner.Parent = label
+	label.Parent = billboard
+	billboard.Parent = top
+
+	-- The client fires TakeFlyers when this prompt is used.
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "Prompt"
+	prompt.ActionText = "Take Flyers"
+	prompt.ObjectText = "Flyers"
+	prompt.HoldDuration = 0.3
+	prompt.MaxActivationDistance = 8
+	prompt.RequiresLineOfSight = false
+	prompt:SetAttribute("Active", true)
+	prompt:SetAttribute("Action", "TakeFlyers")
+	prompt.Parent = top
+
+	model.Parent = plot.model
+	return { model = model, label = label, prompt = prompt }
+end
+
+local function removeFlyerStand(plot)
+	if plot.flyerStand then
+		plot.flyerStand.model:Destroy()
+		plot.flyerStand = nil
+	end
+end
+
+local function refreshFlyerStand(plot)
+	local stand = plot.flyerStand
+	if not stand then
+		return
+	end
+	local left = plot.flyersReadyAt - os.time()
+	local text = left > 0 and ("More flyers in %d:%02d"):format(left // 60, left % 60) or "Free flyers!\nTake a stack"
+	if stand.label.Text ~= text then
+		stand.label.Text = text
+	end
+	if stand.prompt:GetAttribute("Active") ~= (left <= 0) then
+		setActive(stand.prompt, left <= 0)
+	end
+end
+
+-- A flyer flies from the owner's hand to the person who takes it.
+local function tossFlyer(from, person)
+	local root = person.model.PrimaryPart
+	local flyer = flyerPart("Flyer", Vector3.new(0.8, 0.05, 1.1), CFrame.new(from), FLYER_COLOR, Enum.Material.SmoothPlastic, Workspace)
+	local tween = TweenService:Create(flyer, TweenInfo.new(0.35), {
+		CFrame = CFrame.new(root.Position + Vector3.new(0, 1, 0)) * CFrame.Angles(0, math.rad(180), math.rad(20)),
+	})
+	tween:Play()
+	tween.Completed:Connect(function()
+		flyer:Destroy()
+	end)
+end
+
+-- The free townsperson nearest a point, within reach.
+local function nearestFree(point, reach)
+	local nearest, nearestDistance = nil, reach
+	for person in townsfolk do
+		local root = person.model.PrimaryPart
+		if not person.visit and not person.leaving and root then
+			local distance = flatDistance(root.Position, point)
+			if distance <= nearestDistance then
+				nearest, nearestDistance = person, distance
+			end
+		end
+	end
+	return nearest
+end
+
+local function runFlyers(plot, session, player)
+	local nextHandOut, nextFullHint = 0, 0
+	while plot.session == session do
+		task.wait(0.25)
+		refreshFlyerStand(plot)
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if plot.flyers > 0 and root and os.clock() >= nextHandOut then
+			local person = nearestFree(root.Position, Config.Flyers.Reach)
+			if person and plot.visitors >= Config.MaxCustomersBoosted then
+				if os.clock() >= nextFullHint then
+					nextFullHint = os.clock() + FLYER_FULL_HINT_GAP
+					notify(player, "Your bakery is full! Hand out more flyers in a moment")
+				end
+			elseif person then
+				nextHandOut = os.clock() + Config.Flyers.Gap
+				plot.flyers -= 1
+				sendVisitor(plot, session, person)
+				tossFlyer(root.Position + Vector3.new(0, 1, 0), person)
+				say(person.label, FLYER_SAYING)
+				task.delay(2.5, function()
+					if person.label.Text == FLYER_SAYING then
+						person.label.Visible = false
+					end
+				end)
+				if plot.flyers > 0 then
+					notify(player, ("Handed out a flyer! %d left"):format(plot.flyers), "Ding")
+				else
+					notify(player, "That was your last flyer. Get more at the stand outside your door", "Ding")
+				end
+				syncStats(player)
+			end
+		end
+	end
+end
+
+takeFlyersEvent.OnServerEvent:Connect(function(player)
+	local plot = playerPlots[player]
+	local stand = plot and plot.flyerStand
+	if not stand or not isNear(player, stand.model.PrimaryPart.Position, CRATE_REACH) then
+		return
+	end
+	if os.time() < plot.flyersReadyAt then
+		notify(player, "The next stack of flyers isn't ready yet")
+		return
+	end
+	plot.flyers = Config.Flyers.Stack
+	plot.flyersReadyAt = os.time() + Config.Flyers.Restock
+	refreshFlyerStand(plot)
+	syncStats(player)
+	notify(player, ("You have %d flyers. Walk near people on the plaza to hand them out!"):format(plot.flyers), "Coin")
+end)
+
 -- Helpers. They walk to do their jobs: the Baker from the pantry shelf to an empty oven,
 -- and the Stocker from a finished oven to the display cases. Between jobs they wait at the
 -- regular oven, the Baker at one front corner and the Stocker at the other.
@@ -2582,6 +2768,9 @@ local function claimPlot(player)
 			end
 			task.spawn(runCustomerSpawner, plot, plot.session, player)
 			task.spawn(runBakeSale, plot, plot.session, player)
+			plot.flyers, plot.flyersReadyAt = 0, 0
+			plot.flyerStand = buildFlyerStand(plot)
+			task.spawn(runFlyers, plot, plot.session, player)
 			refreshHelpers(plot, data)
 			task.spawn(runBaker, plot, plot.session, player)
 			task.spawn(runStocker, plot, plot.session, player)
@@ -2628,6 +2817,8 @@ local function releasePlot(player)
 	applyPaint(plot, nil)
 	removeCrate(plot)
 	showSaleBanner(plot, false)
+	removeFlyerStand(plot)
+	plot.flyers = 0
 end
 
 -- Gives exclusive and game pass items to their owners, and removes them from anyone
@@ -2884,6 +3075,12 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		crateSpot = floor.CFrame * CFrame.new(9, floor.Size.Y / 2, 24),
 		crate = nil,
 		crateDueAt = 0,
+		-- Across the customer path from the crate.
+		flyerSpot = floor.CFrame * CFrame.new(-9, floor.Size.Y / 2, 24),
+		flyerStand = nil,
+		flyers = 0,
+		flyersReadyAt = 0,
+		saleBanner = nil,
 	}
 	for slot in Config.DeliveryTiers do
 		plot.orderTokens[slot] = 0
