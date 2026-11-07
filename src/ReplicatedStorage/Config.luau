@@ -1003,6 +1003,20 @@ Config.Flyers = { Stack = 5, Restock = 180, Reach = 8, Gap = 1 }
 -- A customer who gets the treat they wanted tips a random share of its price, from Min to Max.
 Config.WantedTip = { Min = 0, Max = 0.25 }
 
+-- Bake Together. Anyone can ask at another bakery's door, and the owner says yes or no.
+-- A bakery takes up to Max co-bakers. Co-bakers bake with the owner's ingredients, carry
+-- their own tray, and get paid for the deliveries they pack. For every customer sale, the
+-- owner gets OwnerBonus more for each active co-baker, and each active co-baker gets Share
+-- of the price as new coins. Active means they did something there in the last
+-- ActiveSeconds. A player waits AskCooldown seconds between asks, and a request closes
+-- after AnswerSeconds.
+Config.CoBake = { Max = 3, Share = 0.25, OwnerBonus = 0.1, ActiveSeconds = 120, AskCooldown = 30, AnswerSeconds = 20 }
+-- Coins go up by PerFriend for each Roblox friend in the same town, up to Max.
+Config.FriendBoost = { PerFriend = 0.1, Max = 0.3 }
+-- A friend's first visit through an invite gives both players Stars. Each player is
+-- rewarded for at most MaxRewards friends.
+Config.Referral = { Stars = 10, MaxRewards = 10 }
+
 -- Townsfolk stroll around the plaza, and customers are townsfolk who head into a bakery.
 -- People walk in from the edge of town, visit a few spots, then walk out again. The crowd
 -- is Base people plus PerBakery for each owned bakery, up to Max. Each walks at
