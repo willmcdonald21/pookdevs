@@ -27,7 +27,7 @@ These can be bought again and again.
 | 2x Boost | 25 | 3728575863 | Double coins for 15 minutes. Buying again adds 15 more |
 
 ## Creating more later
-1. Create an Open Cloud API key with the **game-pass** and **developer-product** APIs, each with read and write access, limited to Bakery Tycoon and your IP address. Saving changes to a key's permissions may generate a new key.
+1. Create an Open Cloud API key with the **game-pass** and **developer-product** APIs, each with read and write access, limited to Sweetopia and your IP address. Saving changes to a key's permissions may generate a new key.
 2. Give the key to Claude through the clipboard, not in chat. Delete the key in Creator Hub when finished.
 3. Add the new item to `Config.Passes` or `Config.Products`, with its ID.
 
