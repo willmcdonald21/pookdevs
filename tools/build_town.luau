@@ -1,7 +1,9 @@
 -- Edit-time builder: arranges the bakeries around a town square and builds the plaza,
--- paths, fountain, lamps, benches, trees and the grocery store.
+-- paths, lamps, benches and the grocery store.
 -- Safe to run again: plots are placed from the LOTS table (not moved relative to where they
 -- are), and everything else is rebuilt from scratch in workspace.Town and workspace.GroceryStore.
+-- That wipes the fountain and the park, so run build_fountain.luau and build_greenery.luau
+-- after it.
 
 local Config = require(game.ReplicatedStorage.Config)
 local ItemBuilder = require(game.ReplicatedStorage.ItemBuilder)
@@ -24,9 +26,7 @@ local LOTS = {
 
 local STONE = Color3.fromRGB(215, 210, 220)
 local DARK_STONE = Color3.fromRGB(170, 165, 175)
-local WATER = Color3.fromRGB(120, 190, 230)
 local WOOD = Color3.fromRGB(150, 100, 70)
-local LEAF = Color3.fromRGB(110, 185, 110)
 local WHITE = Color3.fromRGB(255, 255, 255)
 local GROCER_GREEN = Color3.fromRGB(90, 170, 110)
 local UPRIGHT = CFrame.Angles(0, 0, math.rad(90)) -- cylinders run along X, so stand them up
@@ -93,29 +93,7 @@ for _, lot in LOTS do
 	addPath(town, lotCFrame(lot), lot.Name == "GroceryStore" and 15 or 19.5)
 end
 
--- Fountain
-local fountain = Instance.new("Model")
-fountain.Name = "Fountain"
-fountain.Parent = town
-part("Basin", Vector3.new(1.4, 18, 18), CFrame.new(0, 1.1, 0) * UPRIGHT, DARK_STONE, Enum.Material.Marble, fountain, Enum.PartType.Cylinder)
-part("Water", Vector3.new(0.3, 16, 16), CFrame.new(0, 1.75, 0) * UPRIGHT, WATER, Enum.Material.Glass, fountain, Enum.PartType.Cylinder).Transparency = 0.25
-part("Column", Vector3.new(5, 1.6, 1.6), CFrame.new(0, 4, 0) * UPRIGHT, STONE, Enum.Material.Marble, fountain, Enum.PartType.Cylinder)
-part("Bowl", Vector3.new(0.8, 7, 7), CFrame.new(0, 6.6, 0) * UPRIGHT, STONE, Enum.Material.Marble, fountain, Enum.PartType.Cylinder)
-part("BowlWater", Vector3.new(0.2, 6.2, 6.2), CFrame.new(0, 7, 0) * UPRIGHT, WATER, Enum.Material.Glass, fountain, Enum.PartType.Cylinder).Transparency = 0.25
-local spout = part("Spout", Vector3.new(1, 1, 1), CFrame.new(0, 7.6, 0), WATER, Enum.Material.Glass, fountain, Enum.PartType.Ball)
-local splash = Instance.new("ParticleEmitter")
-splash.Color = ColorSequence.new(Color3.fromRGB(200, 235, 255))
-splash.Size = NumberSequence.new(0.4, 0.1)
-splash.Transparency = NumberSequence.new(0.2, 1)
-splash.Speed = NumberRange.new(6, 8)
-splash.SpreadAngle = Vector2.new(25, 25)
-splash.Acceleration = Vector3.new(0, -25, 0)
-splash.Lifetime = NumberRange.new(0.6, 0.9)
-splash.Rate = 40
-splash.EmissionDirection = Enum.NormalId.Top
-splash.Parent = spout
-
--- Lamps between the lots, benches facing the fountain, trees behind the buildings.
+-- Lamps between the lots, and benches facing the fountain.
 for index, lot in LOTS do
 	local nextLot = LOTS[index % #LOTS + 1]
 	local between = (lot.Angle + ((nextLot.Angle - lot.Angle) % 360) / 2) % 360
@@ -133,14 +111,6 @@ for index, lot in LOTS do
 	light.Brightness = 1.2
 	light.Color = Color3.fromRGB(255, 225, 170)
 	light.Parent = bulb
-
-	local treeBase = direction * (PLAZA_RADIUS + 52)
-	local tree = Instance.new("Model")
-	tree.Name = "Tree"
-	tree.Parent = town
-	part("Trunk", Vector3.new(7, 1.4, 1.4), CFrame.new(treeBase + Vector3.new(0, 3.5, 0)) * UPRIGHT, Color3.fromRGB(120, 85, 60), Enum.Material.Wood, tree, Enum.PartType.Cylinder)
-	part("Leaves", Vector3.new(8, 8, 8), CFrame.new(treeBase + Vector3.new(0, 9, 0)), LEAF, Enum.Material.Grass, tree, Enum.PartType.Ball)
-	part("Leaves", Vector3.new(5.5, 5.5, 5.5), CFrame.new(treeBase + Vector3.new(1.8, 12, 1)), LEAF, Enum.Material.Grass, tree, Enum.PartType.Ball)
 
 	if index % 2 == 0 then
 		local benchCFrame = CFrame.lookAt(direction * 24 + Vector3.new(0, 0.4, 0), Vector3.new(0, 0.4, 0))
