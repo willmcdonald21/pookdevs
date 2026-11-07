@@ -64,7 +64,7 @@ local old = town:FindFirstChild("Greenery")
 if old then
 	old:Destroy()
 end
--- The old ball-on-a-stick trees from build_town.
+-- The ball-on-a-stick trees that older versions of build_town made.
 for _, child in town:GetChildren() do
 	if child.Name == "Tree" then
 		child:Destroy()
