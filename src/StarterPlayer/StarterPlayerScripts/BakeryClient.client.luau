@@ -1074,9 +1074,11 @@ function panels.Friends()
 	})
 end
 
--- Prices come from Roblox, so the store always shows what the player will really pay.
+-- Prices and icons come from Roblox, so the store always shows what the player will really
+-- pay, and the picture set in Creator Hub.
 local productPrices = {}
 local passPrices = {}
+local storeIcons = { Products = {}, Passes = {} }
 
 local function buyProduct(product)
 	local ok, err = pcall(function()
@@ -1132,7 +1134,7 @@ function panels.Store()
 						buyPass(pass)
 					end)
 				end
-				addRow(pass.Name, pass.Detail, { action })
+				addRow(pass.Name, pass.Detail, { action }, storeIcons.Passes[pass.GamePassId])
 			end
 		end
 	end
@@ -1142,7 +1144,7 @@ function panels.Store()
 		local action = robuxAction(product.ProductId, productPrices[product.ProductId], color, function()
 			buyProduct(product)
 		end)
-		addRow(product.Name, productDetail(product), { action })
+		addRow(product.Name, productDetail(product), { action }, storeIcons.Products[product.ProductId])
 	end
 end
 
@@ -1245,7 +1247,7 @@ function panels.Boosts()
 			local action = robuxAction(product.ProductId, productPrices[product.ProductId], GOLD, function()
 				buyProduct(product)
 			end)
-			local boostRow = addRow(product.Name, "", { action })
+			local boostRow = addRow(product.Name, "", { action }, storeIcons.Products[product.ProductId])
 			live(boostRow.Detail, function()
 				return timeLeftText(("Double coins and customers for %d min"):format(product.Amount), state.BoostUntil)
 			end)
@@ -1352,26 +1354,32 @@ closeButton.Activated:Connect(function()
 	setPanel(nil)
 end)
 
-local function loadPrice(id, infoType, prices)
+local function loadPrice(id, infoType, prices, icons)
 	task.spawn(function()
 		local ok, info = pcall(function()
 			return MarketplaceService:GetProductInfo(id, infoType)
 		end)
-		if ok and info.IsForSale then
-			prices[id] = info.PriceInRobux
-			refreshPanel()
+		if not ok then
+			return
 		end
+		if info.IconImageAssetId and info.IconImageAssetId ~= 0 then
+			icons[id] = "rbxassetid://" .. info.IconImageAssetId
+		end
+		if info.IsForSale then
+			prices[id] = info.PriceInRobux
+		end
+		refreshPanel()
 	end)
 end
 
 for _, product in Config.Products do
 	if product.ProductId ~= 0 then
-		loadPrice(product.ProductId, Enum.InfoType.Product, productPrices)
+		loadPrice(product.ProductId, Enum.InfoType.Product, productPrices, storeIcons.Products)
 	end
 end
 for _, pass in Config.Passes do
 	if pass.GamePassId ~= 0 then
-		loadPrice(pass.GamePassId, Enum.InfoType.GamePass, passPrices)
+		loadPrice(pass.GamePassId, Enum.InfoType.GamePass, passPrices, storeIcons.Passes)
 	end
 end
 openPanelEvent.OnClientEvent:Connect(setPanel)
