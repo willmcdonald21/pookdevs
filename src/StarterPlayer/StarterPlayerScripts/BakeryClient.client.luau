@@ -108,6 +108,9 @@ local boostButton = button("BoostButton", UDim2.fromOffset(120, 44), UDim2.fromO
 boostButton.Text = "Boosts"
 local storeButton = button("StoreButton", UDim2.fromOffset(44, 68), UDim2.fromOffset(134, 6), TOP_LEFT, GREEN)
 storeButton.Text = "+"
+-- Bake Together. It sits up here because the left column is already full on phones.
+local friendsButton = button("FriendsButton", UDim2.fromOffset(44, 44), UDim2.fromOffset(134, 78), TOP_LEFT, PINK)
+friendsButton.Text = "👫"
 local hintLabel = label("Hint", UDim2.new(0.5, 0, 0, 32), UDim2.new(0.5, 0, 0, 6), TOP_CENTER, CREAM, BROWN)
 local toastLabel = label("Toast", UDim2.new(0.5, 0, 0, 32), UDim2.new(0.5, 0, 0, 42), TOP_CENTER, BROWN, WHITE)
 toastLabel.Visible = false
@@ -437,8 +440,10 @@ local function withCommas(count)
 	return text
 end
 
-local function salePrice(recipe)
-	local bonus = Config.GetUpgrade("Ingredients").Levels[state.Levels.Ingredients].PriceBonus
+-- Several helpers take an optional source: state.Work, the bakery a co-baker is working
+-- in, instead of the player's own state.
+local function salePrice(recipe, source)
+	local bonus = Config.GetUpgrade("Ingredients").Levels[(source or state).Levels.Ingredients].PriceBonus
 	return math.floor(recipe.Price * (1 + bonus))
 end
 
@@ -451,8 +456,8 @@ local function clockText(seconds)
 	return ("%d:%02d"):format(seconds // 60, seconds % 60)
 end
 
-local function bakeSaleLeft()
-	return secondsUntil(state.BakeSaleAt + Config.BakeSale.Duration)
+local function bakeSaleLeft(source)
+	return secondsUntil((source or state).BakeSaleAt + Config.BakeSale.Duration)
 end
 
 local function bakeSaleReadyIn()
@@ -475,9 +480,9 @@ local function rushNow()
 end
 
 -- What customers pay, and true during a Bake Sale, when it's less.
-local function customerPrice(recipe)
-	local price = salePrice(recipe)
-	if bakeSaleLeft() > 0 then
+local function customerPrice(recipe, source)
+	local price = salePrice(recipe, source)
+	if bakeSaleLeft(source) > 0 then
 		return math.max(1, math.floor(price * (1 - Config.BakeSale.Discount))), true
 	end
 	return price, false
@@ -514,21 +519,22 @@ local function canShip(order)
 end
 
 -- Returns text like "1 Butter, 2 Eggs" for what's missing, or nil when there's enough.
-local function missingIngredients(recipe)
+local function missingIngredients(recipe, source)
+	local pantry = (source or state).Pantry
 	local missing = {}
 	for _, ingredient in Config.Ingredients do
 		local need = recipe.Ingredients[ingredient.Id]
-		if need and state.Pantry[ingredient.Id] < need then
-			table.insert(missing, ("%d %s"):format(need - state.Pantry[ingredient.Id], ingredient.Name))
+		if need and pantry[ingredient.Id] < need then
+			table.insert(missing, ("%d %s"):format(need - pantry[ingredient.Id], ingredient.Name))
 		end
 	end
 	return #missing > 0 and table.concat(missing, ", ") or nil
 end
 
-local function pantrySummary()
+local function pantrySummary(source)
 	local parts = {}
 	for _, ingredient in Config.Ingredients do
-		table.insert(parts, ("%s %d"):format(ingredient.Name, state.Pantry[ingredient.Id]))
+		table.insert(parts, ("%s %d"):format(ingredient.Name, (source or state).Pantry[ingredient.Id]))
 	end
 	return table.concat(parts, ", ")
 end
@@ -620,11 +626,14 @@ function panels.Cookbook()
 	addRow("New goals every day", "Come back tomorrow for more", {})
 end
 
+-- A co-baker sees the pantry of the bakery they're working in.
 function panels.Pantry()
-	panelTitle.Text = ("Pantry (holds %d of each)"):format(state.PantryCapacity)
+	local work = state.Work or state
+	local whose = state.Work and state.Work.OwnerName .. "'s pantry" or "Pantry"
+	panelTitle.Text = ("%s (holds %d of each)"):format(whose, work.PantryCapacity)
 	for _, ingredient in Config.Ingredients do
-		local count = state.Pantry[ingredient.Id]
-		local detail = ("You have %d of %d"):format(count, state.PantryCapacity)
+		local count = work.Pantry[ingredient.Id]
+		local detail = ("%s %d of %d"):format(state.Work and "It has" or "You have", count, work.PantryCapacity)
 		addRow(ingredient.Name, detail, { { Text = tostring(count), Color = count > 0 and GREEN or GREY } })
 	end
 	addHeader("Getting more")
@@ -658,16 +667,18 @@ function panels.Grocery()
 	end
 end
 
+-- A co-baker bakes the owner's recipes with the owner's ingredients and oven upgrades.
 function panels.Bake()
 	panelTitle.Text = "What should we bake?"
-	local ovenTime = Config.GetUpgrade("Oven").Levels[state.Levels.Oven].BakeTime
-	local batch = Config.GetUpgrade("Batch").Levels[state.Levels.Batch].BatchSize
-	addRow("Your pantry", pantrySummary(), {})
-	for index = 1, state.RecipesUnlocked do
+	local work = state.Work or state
+	local ovenTime = Config.GetUpgrade("Oven").Levels[work.Levels.Oven].BakeTime
+	local batch = Config.GetUpgrade("Batch").Levels[work.Levels.Batch].BatchSize
+	addRow(state.Work and state.Work.OwnerName .. "'s pantry" or "Your pantry", pantrySummary(work), {})
+	for index = 1, work.RecipesUnlocked do
 		local recipe = Config.Recipes[index]
 		local title =
-			("%s: %d in %.1fs, %d coins each"):format(recipe.Name, batch, ovenTime * recipe.BakeScale, (customerPrice(recipe)))
-		local missing = missingIngredients(recipe)
+			("%s: %d in %.1fs, %d coins each"):format(recipe.Name, batch, ovenTime * recipe.BakeScale, (customerPrice(recipe, work)))
+		local missing = missingIngredients(recipe, work)
 		if missing then
 			addRow(title, "Missing " .. missing, { { Text = "Need more", Color = GREY } })
 		else
@@ -953,11 +964,12 @@ function panels.Decorate()
 	end
 end
 
+-- A co-baker sees the orders of the bakery they're working in, and packs from their own tray.
 function panels.Deliveries()
-	panelTitle.Text = "Deliveries"
+	panelTitle.Text = state.Work and state.Work.OwnerName .. "'s Deliveries" or "Deliveries"
 	local carrying = itemList(state.Tray)
 	addRow("You're carrying", carrying ~= "" and carrying or "Nothing yet", {})
-	for slot, order in state.Orders do
+	for slot, order in (state.Work or state).Orders do
 		local skip = {
 			Text = Config.NewOrderStars .. " Star: New",
 			Color = state.Stars >= Config.NewOrderStars and GOLD or GREY,
@@ -984,6 +996,71 @@ function panels.Deliveries()
 			})
 		end
 	end
+end
+
+-- Bake Together: whose bakery you're in, who's in yours, and inviting friends.
+function panels.Friends()
+	panelTitle.Text = "Bake Together"
+	local co = Config.CoBake
+	if state.Work then
+		addRow(("Baking with %s"):format(state.Work.OwnerName), "Bake, fill their cases and pack their orders", {
+			{
+				Text = "Stop",
+				Color = PINK,
+				OnClick = function()
+					ReplicatedStorage.LeaveCoBake:FireServer()
+				end,
+			},
+		})
+	end
+	addHeader("Baking in your bakery")
+	if #state.CoBakers == 0 then
+		addRow("Nobody yet", "Other bakers can ask at your door to bake with you", {})
+	end
+	for _, coBaker in state.CoBakers do
+		addRow(coBaker.Name, "Helping in your bakery", {
+			{
+				Text = "Remove",
+				Color = GREY,
+				TextColor = BROWN,
+				OnClick = function()
+					ReplicatedStorage.RemoveCoBaker:FireServer(coBaker.UserId)
+				end,
+			},
+		})
+	end
+	-- 0.1 becomes 10. Rounding matters, since 0.1 * 100 is a hair over 10.
+	local function percent(share)
+		return math.floor(share * 100 + 0.5)
+	end
+	addHeader("How it works")
+	addRow("Ask at a bakery's door", ("The owner says yes or no. Up to %d can join one bakery"):format(co.Max), {})
+	addRow(
+		"Everyone earns more",
+		("Owners get +%d%% per helper, helpers get %d%% of each sale"):format(percent(co.OwnerBonus), percent(co.Share)),
+		{}
+	)
+	local boost = Config.FriendBoost
+	local boostDetail = state.FriendBoost > 0 and ("You have +%d%% coins right now"):format(percent(state.FriendBoost))
+		or ("+%d%% coins for each Roblox friend in town, up to +%d%%"):format(percent(boost.PerFriend), percent(boost.Max))
+	addRow("Friend Boost", boostDetail, {})
+	addRow("Invite friends", ("A friend's first visit gives you both %s"):format(starText(Config.Referral.Stars)), {
+		{
+			Text = "Invite",
+			Color = GREEN,
+			OnClick = function()
+				local SocialService = game:GetService("SocialService")
+				task.spawn(function()
+					local ok, canInvite = pcall(SocialService.CanSendGameInviteAsync, SocialService, player)
+					if ok and canInvite then
+						local options = Instance.new("ExperienceInviteOptions")
+						options.PromptMessage = "Come bake with me in Sweetopia!"
+						pcall(SocialService.PromptGameInvite, SocialService, player, options)
+					end
+				end)
+			end,
+		},
+	})
 end
 
 -- Prices come from Roblox, so the store always shows what the player will really pay.
@@ -1236,6 +1313,9 @@ cookbookButton.Activated:Connect(function()
 end)
 boostButton.Activated:Connect(function()
 	togglePanel("Boosts")
+end)
+friendsButton.Activated:Connect(function()
+	togglePanel("Friends")
 end)
 
 -- Once a second, boost times count down on the button and in the Boosts menu. The menu is
@@ -2038,17 +2118,19 @@ end)
 stateEvent.OnClientEvent:Connect(function(newState)
 	state = newState
 	showRunning(state.Running)
-	local multiplierText = state.Multiplier > 1 and (" x%d"):format(state.Multiplier) or ""
+	-- The Friend Boost makes multipliers like 2.2, so show one decimal place when there is one.
+	local multiplierText = state.Multiplier > 1 and (" x%g"):format(math.floor(state.Multiplier * 10 + 0.5) / 10) or ""
 	coinsLabel.Text = ("%d coins%s"):format(state.Coins, multiplierText)
 	starsLabel.Text = starText(state.Stars)
 	shopButton.BackgroundColor3 = state.CanAfford and GREEN or PINK
 	shopButton.Text = state.CanAfford and "Shop!" or "Shop"
 	local ready = false
-	for _, order in state.Orders do
+	for _, order in (state.Work or state).Orders do
 		if canShip(order) then
 			ready = true
 		end
 	end
+	friendsButton.BackgroundColor3 = (state.Work or #state.CoBakers > 0) and GREEN or PINK
 	deliveryButton.BackgroundColor3 = ready and GREEN or BLUE
 	deliveryButton.Text = ready and "Deliveries!" or "Deliveries"
 	local cookbookReady = state.CanUnlockRecipe
@@ -2185,9 +2267,79 @@ popupEvent.OnClientEvent:Connect(function(kind, info)
 	end
 end)
 
--- Prompts
+-- Bake Together requests: a small card under the toast, so the game stays playable, with
+-- Yes and No thanks. It closes itself when the time to answer runs out.
+do
+	local requestEvent = ReplicatedStorage:WaitForChild("CoBakeRequest")
+	local answerEvent = ReplicatedStorage:WaitForChild("AnswerCoBake")
+	local card = style(Instance.new("Frame"), "CoBakeRequest", UDim2.fromOffset(340, 116), UDim2.new(0.5, 0, 0, 80), TOP_CENTER, CREAM)
+	card.Visible = false
+	card.ZIndex = 9
+	card.Parent = gui
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = PINK
+	stroke.Thickness = 3
+	stroke.Parent = card
+	local text = label("Text", UDim2.new(1, -16, 0, 44), UDim2.fromOffset(8, 6), TOP_LEFT, CREAM, BROWN, card)
+	text.ZIndex = 10
+	local yes = button("Yes", UDim2.new(0.5, -12, 0, 48), UDim2.new(0, 8, 1, -8), Vector2.new(0, 1), GREEN, card)
+	yes.Text = "Yes!"
+	yes.ZIndex = 10
+	local no = button("No", UDim2.new(0.5, -12, 0, 48), UDim2.new(1, -8, 1, -8), Vector2.new(1, 1), GREY, card)
+	no.TextColor3 = BROWN
+	no.ZIndex = 10
+	local current = nil
+
+	local function answer(said)
+		if current then
+			answerEvent:FireServer(current, said)
+			current = nil
+		end
+		card.Visible = false
+	end
+	yes.Activated:Connect(function()
+		answer(true)
+	end)
+	no.Activated:Connect(function()
+		answer(false)
+	end)
+
+	requestEvent.OnClientEvent:Connect(function(info)
+		local id = info.Id
+		current = id
+		text.Text = ("%s wants to bake with you!"):format(info.Name)
+		card.Visible = true
+		if sounds.Ding then
+			sounds.Ding:Play()
+		end
+		task.spawn(function()
+			for left = info.Seconds, 1, -1 do
+				if current ~= id then
+					return
+				end
+				no.Text = ("No thanks (%d)"):format(left)
+				task.wait(1)
+			end
+			if current == id then
+				current = nil
+				card.Visible = false
+			end
+		end)
+	end)
+end
+
+-- Prompts. Owners see all of their bakery's prompts, and co-bakers the ones marked CoBake
+-- in the bakery they're working in. The door's "Ask to Bake Together" prompt shows on
+-- other players' bakeries only.
 local function refreshPrompt(prompt)
-	prompt.Enabled = isMine(plotOf(prompt)) and prompt:GetAttribute("Active") == true
+	local plot = plotOf(prompt)
+	local active = prompt:GetAttribute("Active") == true
+	local coBaking = plot ~= nil and player:GetAttribute("CoBaking") == plot.Name
+	if prompt:GetAttribute("Door") then
+		prompt.Enabled = active and plot ~= nil and plot:GetAttribute("OwnerId") ~= nil and not isMine(plot) and not coBaking
+	else
+		prompt.Enabled = active and (isMine(plot) or (coBaking and prompt:GetAttribute("CoBake") == true))
+	end
 end
 
 local function watchPrompt(prompt)
@@ -2195,6 +2347,9 @@ local function watchPrompt(prompt)
 		return
 	end
 	prompt:GetAttributeChangedSignal("Active"):Connect(function()
+		refreshPrompt(prompt)
+	end)
+	prompt:GetAttributeChangedSignal("CoBake"):Connect(function()
 		refreshPrompt(prompt)
 	end)
 	refreshPrompt(prompt)
@@ -2239,8 +2394,10 @@ arrowText.TextStrokeTransparency = 0
 arrowText.Parent = arrow
 arrow.Parent = gui
 
+-- A co-baker is guided around the bakery they're working in.
 local function refreshGuide()
-	local plot = myPlot()
+	local coBaking = player:GetAttribute("CoBaking")
+	local plot = coBaking and plotsFolder:FindFirstChild(coBaking) or myPlot()
 	local target = player:GetAttribute("Target")
 	local instance = nil
 	if plot and target then
@@ -2261,6 +2418,14 @@ for _, plot in plotsFolder:GetChildren() do
 		refreshGuide()
 	end)
 end
+player:GetAttributeChangedSignal("CoBaking"):Connect(function()
+	for _, instance in plotsFolder:GetDescendants() do
+		if instance:IsA("ProximityPrompt") then
+			refreshPrompt(instance)
+		end
+	end
+	refreshGuide()
+end)
 refreshGuide()
 
 -- VIP chat tag
