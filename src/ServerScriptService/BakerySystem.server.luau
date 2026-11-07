@@ -672,6 +672,7 @@ local function syncStats(player)
 		Multiplier = coinMultiplier(player, data),
 		BoostUntil = data.BoostUntil,
 		BakeSaleAt = data.BakeSaleAt,
+		BuzzUntil = data.BuzzUntil,
 		Rush = rushPower(data),
 		Flyers = plot and plot.flyers or 0,
 		FlyersReadyAt = plot and plot.flyersReadyAt or 0,
@@ -1215,6 +1216,14 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, paintId)
 			moveWallPieces(plot, data, old, plotBounds(data))
 			syncStats(player)
 			notify(player, "Your bakery is bigger! Decorate the new space", "Coin")
+		end
+	elseif kind == "Buzz" then
+		if buyWithStars(player, data, Config.Buzz.Stars) then
+			-- Buying again while it's on adds more time.
+			data.BuzzUntil = math.max(data.BuzzUntil, os.time()) + Config.Buzz.Minutes * 60
+			syncStats(player)
+			local left = math.ceil((data.BuzzUntil - os.time()) / 60)
+			notify(player, ("Bakery Buzz! Extra customers for the next %d min"):format(left), "Ding")
 		end
 	elseif kind == "Paint" or kind == "PaintCase" then
 		local paint = Config.GetPaint(paintId)
@@ -3151,7 +3160,7 @@ task.spawn(runCrowd)
 PurchaseHandler.Start(function(player, product)
 	syncStats(player)
 	if product.Currency == "Boost" then
-		notify(player, ("Thank you! Double coins for %d more minutes"):format(product.Amount), "Coin")
+		notify(player, ("Thank you! Double coins and customers for %d more minutes"):format(product.Amount), "Coin")
 		return
 	end
 	local unit = product.Currency == "Stars" and "Sugar Stars" or "coins"
