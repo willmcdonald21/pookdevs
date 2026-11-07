@@ -231,10 +231,16 @@ local function placedCaseCount(data)
 	return count
 end
 
+-- Extra copies of a game pass item, bought with coins, add no Charm.
 local function totalCharm(data)
 	local charm = 0
+	local counted = {}
 	for _, entry in data.Placed do
-		charm += Config.GetItem(entry.Id).Charm
+		local item = Config.GetItem(entry.Id)
+		if not (item.ExtraCoins and counted[item.Id]) then
+			charm += item.Charm
+			counted[item.Id] = true
+		end
 	end
 	return charm
 end
@@ -1188,11 +1194,17 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, paintId)
 		end
 	elseif kind == "Item" and type(id) == "string" then
 		local item = Config.GetItem(id)
-		if not item or item.OnlyFor or item.Pass then
+		if not item or item.OnlyFor then
+			return
+		end
+		-- Only a pass's owners can buy more of its items.
+		if item.Pass and not (item.ExtraCoins and PurchaseHandler.OwnsPass(player, item.Pass)) then
 			return
 		end
 		local paid
-		if item.Stars then
+		if item.Pass then
+			paid = buy(player, data, item.ExtraCoins)
+		elseif item.Stars then
 			paid = buyWithStars(player, data, item.Stars)
 		else
 			paid = buy(player, data, item.Coins)
@@ -2843,13 +2855,19 @@ local function releasePlot(player)
 end
 
 -- Gives exclusive and game pass items to their owners, and removes them from anyone
--- else's save.
+-- else's save. Owners keep any extra copies they bought.
 local function applyExclusiveItems(player, data)
 	for _, item in Config.Items do
 		if item.OnlyFor or item.Pass then
 			local allowed = Config.IsAllowed(item, player.UserId)
 				and (not item.Pass or PurchaseHandler.OwnsPass(player, item.Pass))
-			data.Owned[item.Id] = allowed and 1 or 0
+			if not allowed then
+				data.Owned[item.Id] = 0
+			elseif item.ExtraCoins then
+				data.Owned[item.Id] = math.max(data.Owned[item.Id], 1)
+			else
+				data.Owned[item.Id] = 1
+			end
 			if not allowed then
 				for key, entry in data.Placed do
 					if entry.Id == item.Id then
