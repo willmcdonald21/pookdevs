@@ -1,8 +1,8 @@
-# pookdevs: Bakery Tycoon
+# pookdevs: Sweetopia
 
 A Roblox bakery tycoon set around a town square. Players bake treats from ingredients, stock display cases, sell to customers who shop on their own, and pack deliveries for coins and Sugar Stars. Townsfolk walk in from the edges of town and stroll around the plaza. Customers are townsfolk who head in from the plaza at random moments, with a thought bubble showing the unlocked treat they want. They tip when they get it and settle for another treat when it's missing, then go back to the plaza. A hired Baker bakes a random treat you have ingredients for. The checkout counter is the size of the other counters, with a retro cash register. Ingredients come from a free delivery crate and the grocery store on the square. Coins and Stars pay for upgrades, recipes and decorations. Everything in a bakery, including the oven and counters, can be moved and turned on a grid of 1-stud squares. Wall decorations, such as sconces, plants and paintings, hang on the back and side walls and have their own Wall tab in the Decorate menu. The Decorate menu's Paint tab recolours each wall, the oven and each display case. Its Expansion tab makes the bakery bigger in three steps, and sells the gold Luxury Oven, a second oven for 25,000 coins that bakes 15% faster and can't be repainted.
 
-- **Place:** Bakery Tycoon, placeId 124037168545233
+- **Place:** Sweetopia (formerly Bakery Tycoon), placeId 124037168545233
 - **Built in:** Roblox Studio, with Claude Code connected through the Studio MCP server
 
 ## Contents
