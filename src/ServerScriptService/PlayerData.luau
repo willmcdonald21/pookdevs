@@ -187,7 +187,12 @@ local function clean(saved)
 		-- How many times the bakery has been made bigger. 0 is the starting size.
 		Expansion = math.clamp(math.floor(tonumber(saved.Expansion) or 0), 0, #Config.Expansions),
 		Paint = cleanPaint(saved.Paint),
+		-- 0 until the first save, so a 0 here means this is the player's first visit.
 		LastSeen = cleanCount(saved.LastSeen),
+		-- Who invited this player (a userId), or 0. Set on a first visit through an invite.
+		ReferredBy = cleanCount(saved.ReferredBy),
+		-- How many invited friends this player has been rewarded for.
+		ReferralRewards = cleanCount(saved.ReferralRewards),
 		DailyDay = cleanCount(saved.DailyDay),
 		DailyStreak = math.min(cleanCount(saved.DailyStreak), #Config.DailyRewards),
 		Goals = cleanGoals(saved.Goals),
