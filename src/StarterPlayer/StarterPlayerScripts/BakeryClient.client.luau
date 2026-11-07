@@ -895,7 +895,18 @@ function panels.Decorate()
 				actions = { { Text = "Just for you", Color = PINK } }
 			elseif item.Pass then
 				local pass = Config.GetPass(item.Pass)
-				if state.Passes[item.Pass] then
+				if state.Passes[item.Pass] and item.ExtraCoins then
+					detail = ("Charm +%d for the first one only. You have %d to place"):format(item.Charm, stored)
+					actions = {
+						{
+							Text = item.ExtraCoins .. " coins",
+							Color = state.Coins >= item.ExtraCoins and GREEN or GREY,
+							OnClick = function()
+								purchaseEvent:FireServer("Item", item.Id)
+							end,
+						},
+					}
+				elseif state.Passes[item.Pass] then
 					actions = { { Text = pass.Name, Color = PINK } }
 				else
 					detail = ("Charm +%d. Comes with %s"):format(item.Charm, pass.Name)
