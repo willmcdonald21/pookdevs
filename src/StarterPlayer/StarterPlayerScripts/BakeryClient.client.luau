@@ -1,5 +1,5 @@
 -- Draws the HUD and menus, handles placing items, plays sounds, points at the next
--- task, swings customers' limbs, and shows only your own bakery's prompts.
+-- task, animates the townsfolk, and shows only your own bakery's prompts.
 local CollectionService = game:GetService("CollectionService")
 local GuiService = game:GetService("GuiService")
 local MarketplaceService = game:GetService("MarketplaceService")
@@ -2459,32 +2459,60 @@ TextChatService.OnIncomingMessage = function(message)
 end
 
 -- Customer walking
-local SWING_ANGLE = math.rad(35)
-local SWING_SPEED = 7
-local joints = {}
-
-local function watchCustomer(model)
-	local root = model:WaitForChild("Torso", 5)
-	if not root then
-		return
-	end
-	local function addJoint(joint)
-		if joint:IsA("Motor6D") and joint:GetAttribute("Swing") then
-			joints[joint] = { model = model, c0 = joint.C0, swing = joint:GetAttribute("Swing") }
+-- Townsfolk and helpers are Roblox avatars moved by the server. Each one plays Roblox's
+-- default walk while its Walking attribute is on, timed to its Speed attribute, and the
+-- default idle otherwise, and blinks now and then. This sits in a block, and its numbers
+-- are written in place, because the script is close to Luau's limit of 200 locals.
+do
+	local function watchCustomer(model)
+		local humanoid = model:WaitForChild("Humanoid", 5)
+		local animator = humanoid and humanoid:WaitForChild("Animator", 5)
+		if not animator then
+			return
 		end
+		local function load(id)
+			local animation = Instance.new("Animation")
+			animation.AnimationId = id
+			local track = animator:LoadAnimation(animation)
+			track.Looped = true
+			return track
+		end
+		local walk = load("rbxassetid://913402848")
+		local idle = load("rbxassetid://507766388")
+		idle:Play(0)
+		load("rbxassetid://14366558676"):Play()
+		local function update()
+			-- Roblox's Animate script plays the walk at normal speed for 6.4 studs a second.
+			local speed = (model:GetAttribute("Speed") or Config.CustomerSpeed) / 6.4
+			if model:GetAttribute("Walking") then
+				if walk.IsPlaying then
+					walk:AdjustSpeed(speed)
+				else
+					walk:Play(0.2, 1, speed)
+					idle:Stop(0.2)
+				end
+			else
+				-- Pathfinding walks a person from step to step, so a short stop doesn't end
+				-- the walk.
+				task.delay(0.15, function()
+					if not model:GetAttribute("Walking") and walk.IsPlaying then
+						walk:Stop(0.25)
+						idle:Play(0.25)
+					end
+				end)
+			end
+		end
+		model:GetAttributeChangedSignal("Walking"):Connect(update)
+		update()
 	end
-	for _, joint in root:GetChildren() do
-		addJoint(joint)
-	end
-	root.ChildAdded:Connect(addJoint)
-end
 
--- Helpers walk around the bakery too, so their limbs swing the same way.
-for _, tag in { "Customer", "Helper" } do
-	for _, model in CollectionService:GetTagged(tag) do
-		task.spawn(watchCustomer, model)
+	-- Helpers walk around the bakery too, so they're animated the same way.
+	for _, tag in { "Customer", "Helper" } do
+		for _, model in CollectionService:GetTagged(tag) do
+			task.spawn(watchCustomer, model)
+		end
+		CollectionService:GetInstanceAddedSignal(tag):Connect(watchCustomer)
 	end
-	CollectionService:GetInstanceAddedSignal(tag):Connect(watchCustomer)
 end
 
 -- A customer on their way to a bakery thinks of the treat they want: a white cloud with
@@ -2528,7 +2556,7 @@ local function thoughtBubble(root, recipeIndex)
 end
 
 local function watchWants(model)
-	local root = model:WaitForChild("Torso", 5)
+	local root = model:WaitForChild("HumanoidRootPart", 5)
 	if not root then
 		return
 	end
@@ -2551,18 +2579,3 @@ for _, model in CollectionService:GetTagged("Customer") do
 	task.spawn(watchWants, model)
 end
 CollectionService:GetInstanceAddedSignal("Customer"):Connect(watchWants)
-
-RunService.RenderStepped:Connect(function()
-	local now = os.clock()
-	for joint, info in joints do
-		if not joint:IsDescendantOf(Workspace) then
-			joints[joint] = nil
-		else
-			local angle = 0
-			if info.model:GetAttribute("Walking") then
-				angle = math.sin(now * SWING_SPEED) * SWING_ANGLE * info.swing
-			end
-			joint.C0 = info.c0 * CFrame.Angles(angle, 0, 0)
-		end
-	end
-end)
