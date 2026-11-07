@@ -103,15 +103,6 @@ local function coBakersOf(plot)
 	return list
 end
 
--- Everyone working in a bakery: its owner first, then its co-bakers.
-local function workersOf(plot)
-	local list = coBakersOf(plot)
-	if plot.owner then
-		table.insert(list, 1, plot.owner)
-	end
-	return list
-end
-
 -- Co-bakers who've done something in the bakery recently. Only they share in its sales.
 local function activeCoBakers(plot)
 	local list = {}
@@ -2599,7 +2590,56 @@ local function refreshFlyerStand(plot)
 	end
 end
 
--- A flyer flies from the owner's hand to the person who takes it.
+-- The stack in the holder's right hand, one sheet for each flyer left. If the holder stops
+-- working in the bakery, the owner takes over the stack.
+local function updateHeldFlyers(plot)
+	local holder = plot.flyerHolder
+	if holder and workPlot(holder) ~= plot then
+		holder = plot.owner
+		plot.flyerHolder = holder
+	end
+	local character = holder and plot.flyers > 0 and holder.Character
+	local hand = character and (character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm"))
+	local grip = hand and hand:FindFirstChild("RightGripAttachment")
+	local held = plot.heldFlyers
+	if held and held.Parent == character and held:GetAttribute("Count") == plot.flyers then
+		return
+	end
+	if held then
+		held:Destroy()
+		plot.heldFlyers = nil
+	end
+	if not grip then
+		return
+	end
+	local model = Instance.new("Model")
+	model.Name = "HeldFlyers"
+	model:SetAttribute("Count", plot.flyers)
+	-- Pinched by the top edge, hanging below the hand, turned so it shows from behind.
+	local base = hand.CFrame * grip.CFrame * CFrame.new(0, 0, -0.5) * CFrame.Angles(0, 0, math.rad(45))
+	for index = 1, plot.flyers do
+		local sheet = flyerPart(
+			"Sheet",
+			Vector3.new(0.05, 0.9, 1.2),
+			base * CFrame.new((index - 1) * 0.07, 0, 0) * CFrame.Angles(math.rad((index % 2) * 6 - 3), 0, 0),
+			index == plot.flyers - 1 and Color3.fromRGB(255, 250, 240) or FLYER_COLOR,
+			Enum.Material.SmoothPlastic,
+			model
+		)
+		sheet.Anchored = false
+		sheet.CanQuery = false
+		sheet.CanTouch = false
+		sheet.Massless = true
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = hand
+		weld.Part1 = sheet
+		weld.Parent = sheet
+	end
+	model.Parent = character
+	plot.heldFlyers = model
+end
+
+-- A flyer flies from the holder's hand to the person who takes it.
 local function tossFlyer(from, person)
 	local root = person.model.PrimaryPart
 	local flyer = flyerPart("Flyer", Vector3.new(0.8, 0.05, 1.1), CFrame.new(from), FLYER_COLOR, Enum.Material.SmoothPlastic, Workspace)
@@ -2627,45 +2667,44 @@ local function nearestFree(point, reach)
 	return nearest
 end
 
--- Anyone working in the bakery, its owner or a co-baker, hands out its flyers to the
--- townsfolk they walk past.
+-- Whoever took the stack, the owner or a co-baker, carries it in their hand and hands out
+-- flyers to the townsfolk they walk past.
 local function runFlyers(plot, session, player)
 	local nextHandOut, nextFullHint = 0, 0
 	while plot.session == session do
 		task.wait(0.25)
 		refreshFlyerStand(plot)
-		if plot.flyers > 0 and os.clock() >= nextHandOut then
-			for _, worker in workersOf(plot) do
-				local character = worker.Character
-				local root = character and character:FindFirstChild("HumanoidRootPart")
-				local person = root and nearestFree(root.Position, Config.Flyers.Reach)
-				local whose = worker == player and "Your" or "This"
-				if person and plot.visitors >= Config.MaxCustomersBoosted then
-					if os.clock() >= nextFullHint then
-						nextFullHint = os.clock() + FLYER_FULL_HINT_GAP
-						notify(worker, whose .. " bakery is full! Hand out more flyers in a moment")
-					end
-					break
-				elseif person then
-					nextHandOut = os.clock() + Config.Flyers.Gap
-					plot.flyers -= 1
-					sendVisitor(plot, session, person)
-					tossFlyer(root.Position + Vector3.new(0, 1, 0), person)
-					say(person.label, FLYER_SAYING)
-					task.delay(2.5, function()
-						if person.label.Text == FLYER_SAYING then
-							person.label.Visible = false
-						end
-					end)
-					if plot.flyers > 0 then
-						notify(worker, ("Handed out a flyer! %d left"):format(plot.flyers), "Ding")
-					else
-						notify(worker, "That was the last flyer. Get more at the stand outside the door", "Ding")
-					end
-					markActive(worker)
-					syncWork(worker, plot)
-					break
+		updateHeldFlyers(plot)
+		local holder = plot.flyerHolder
+		if holder and plot.flyers > 0 and os.clock() >= nextHandOut then
+			local character = holder.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart")
+			local person = root and nearestFree(root.Position, Config.Flyers.Reach)
+			if person and plot.visitors >= Config.MaxCustomersBoosted then
+				if os.clock() >= nextFullHint then
+					nextFullHint = os.clock() + FLYER_FULL_HINT_GAP
+					notify(holder, (holder == player and "Your" or "This") .. " bakery is full! Hand out more flyers in a moment")
 				end
+			elseif person then
+				local held = plot.heldFlyers and plot.heldFlyers:FindFirstChild("Sheet")
+				nextHandOut = os.clock() + Config.Flyers.Gap
+				plot.flyers -= 1
+				sendVisitor(plot, session, person)
+				tossFlyer(held and held.Position or root.Position + Vector3.new(0, 1, 0), person)
+				updateHeldFlyers(plot)
+				say(person.label, FLYER_SAYING)
+				task.delay(2.5, function()
+					if person.label.Text == FLYER_SAYING then
+						person.label.Visible = false
+					end
+				end)
+				if plot.flyers > 0 then
+					notify(holder, ("Handed out a flyer! %d left"):format(plot.flyers), "Ding")
+				else
+					notify(holder, "That was the last flyer. Get more at the stand outside the door", "Ding")
+				end
+				markActive(holder)
+				syncWork(holder, plot)
 			end
 		end
 	end
@@ -2684,7 +2723,9 @@ takeFlyersEvent.OnServerEvent:Connect(function(player)
 	end
 	plot.flyers = Config.Flyers.Stack
 	plot.flyersReadyAt = os.time() + Config.Flyers.Restock
+	plot.flyerHolder = player
 	refreshFlyerStand(plot)
+	updateHeldFlyers(plot)
 	syncWork(player, plot)
 	notify(player, ("You have %d flyers. Walk near people on the plaza to hand them out!"):format(plot.flyers), "Coin")
 end)
@@ -3244,6 +3285,8 @@ local function releasePlot(player)
 	showSaleBanner(plot, false)
 	removeFlyerStand(plot)
 	plot.flyers = 0
+	plot.flyerHolder = nil
+	updateHeldFlyers(plot)
 end
 
 -- Gives exclusive and game pass items to their owners, and removes them from anyone
@@ -3661,6 +3704,9 @@ local function setUpPlot(model)
 		flyerStand = nil,
 		flyers = 0,
 		flyersReadyAt = 0,
+		-- Who took the stack, and the HeldFlyers model in their hand.
+		flyerHolder = nil,
+		heldFlyers = nil,
 		saleBanner = nil,
 	}
 	for slot in Config.DeliveryTiers do
