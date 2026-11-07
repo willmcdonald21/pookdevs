@@ -25,21 +25,10 @@ local GROCERY_REACH = 20
 local FIRST_CRATE_DELAY = 15
 local SLOT_ITEM_SCALE = 0.5
 local TRAY_ITEM_SCALE = 0.6
--- How high a customer's root part sits above the floor.
-local CUSTOMER_HEIGHT = 3.1
-local CUSTOMER_COLORS = {
-	Color3.fromRGB(255, 170, 165),
-	Color3.fromRGB(165, 200, 255),
-	Color3.fromRGB(190, 230, 170),
-	Color3.fromRGB(255, 215, 140),
-	Color3.fromRGB(205, 175, 240),
-}
-local SKIN_COLORS = {
-	Color3.fromRGB(255, 220, 185),
-	Color3.fromRGB(225, 175, 130),
-	Color3.fromRGB(165, 115, 80),
-	Color3.fromRGB(110, 75, 55),
-}
+-- How high a person's root part sits above the floor, as tools/build_townsfolk.luau measures it.
+local CUSTOMER_HEIGHT = 3
+-- The Roblox avatars townsfolk and helpers are cloned from, made by tools/build_townsfolk.luau.
+local LOOKS = ServerStorage:WaitForChild("TownsfolkLooks")
 
 local function remote(name)
 	local event = Instance.new("RemoteEvent")
@@ -1815,52 +1804,13 @@ startBakeSaleEvent.OnServerEvent:Connect(function(player)
 end)
 
 -- Customers
-local function buildPerson(name, shirt, skin)
-	local model = Instance.new("Model")
+-- A person is a clone of one of the looks, with a speech bubble over their head. Their root
+-- part is anchored and moved by tweening, and the client plays their walk and idle
+-- animations.
+local function buildPerson(name, look)
+	local model = look:Clone()
 	model.Name = name
-
-	local root = Instance.new("Part")
-	root.Name = "Torso"
-	root.Anchored = true
-	root.CanCollide = false
-	root.Size = Vector3.new(2, 2, 1)
-	root.Color = shirt
-	root.Parent = model
-	model.PrimaryPart = root
-
-	-- Limbs hang from Motor6Ds so the client can swing them while walking.
-	local function limb(name, size, offset, color, swing)
-		local part = Instance.new("Part")
-		part.Name = name
-		part.Size = size
-		part.Color = color
-		part.CanCollide = false
-		part.Massless = true
-		part.CFrame = root.CFrame * offset
-		part.Parent = model
-		local joint = Instance.new("Motor6D")
-		joint.Name = name .. "Joint"
-		joint.Part0 = root
-		joint.Part1 = part
-		local hinge = size.Y / 2
-		joint.C0 = offset * CFrame.new(0, hinge, 0)
-		joint.C1 = CFrame.new(0, hinge, 0)
-		if swing then
-			joint:SetAttribute("Swing", swing)
-		end
-		joint.Parent = root
-		return part
-	end
-
-	local head = limb("Head", Vector3.new(1.4, 1.4, 1.4), CFrame.new(0, 1.7, 0), skin)
-	limb("LeftArm", Vector3.new(1, 2, 1), CFrame.new(-1.5, 0, 0), skin, -1)
-	limb("RightArm", Vector3.new(1, 2, 1), CFrame.new(1.5, 0, 0), skin, 1)
-	limb("LeftLeg", Vector3.new(0.95, 2, 1), CFrame.new(-0.5, -2, 0), Color3.fromRGB(80, 80, 110), 1)
-	limb("RightLeg", Vector3.new(0.95, 2, 1), CFrame.new(0.5, -2, 0), Color3.fromRGB(80, 80, 110), -1)
-	local face = Instance.new("Decal")
-	face.Face = Enum.NormalId.Front
-	face.Texture = "rbxasset://textures/face.png"
-	face.Parent = head
+	local root = model.PrimaryPart
 
 	local bubble = Instance.new("BillboardGui")
 	bubble.Name = "Bubble"
@@ -1884,23 +1834,21 @@ local function buildPerson(name, shirt, skin)
 	return model, label
 end
 
--- Golden customers wear a crown and sparkle.
+-- Townsfolk wear a random look. Golden customers wear a crown and sparkle.
 local function buildCustomer(golden)
-	local shirt = CUSTOMER_COLORS[math.random(#CUSTOMER_COLORS)]
-	local skin = SKIN_COLORS[math.random(#SKIN_COLORS)]
-	local model, label = buildPerson("Customer", shirt, skin)
+	local looks = LOOKS.People:GetChildren()
+	local model, label = buildPerson("Customer", looks[math.random(#looks)])
 	if golden then
 		local head = model.Head
 		local crown = Instance.new("Part")
 		crown.Name = "Crown"
-		crown.Size = Vector3.new(1.1, 0.5, 1.1)
+		crown.Size = Vector3.new(1.25, 0.5, 1.25)
 		crown.Color = Color3.fromRGB(255, 200, 60)
 		crown.Material = Enum.Material.Foil
 		crown.CanCollide = false
 		crown.Massless = true
 		crown.CFrame = head.CFrame * CFrame.new(0, 0.95, 0)
-		-- A joint with a fixed offset, like the limbs, so the crown follows the head after
-		-- the customer is moved into place.
+		-- A joint with a fixed offset, so the crown follows the head once the customer moves.
 		local joint = Instance.new("Motor6D")
 		joint.Part0 = head
 		joint.Part1 = crown
@@ -1924,8 +1872,11 @@ local function walkCustomer(model, to, speed, stop)
 	if distance < 0.1 then
 		return
 	end
-	local duration = distance / (speed or Config.CustomerSpeed)
+	speed = speed or Config.CustomerSpeed
+	local duration = distance / speed
 	root.CFrame = CFrame.lookAt(from, to)
+	-- The client times their steps to this.
+	model:SetAttribute("Speed", speed)
 	model:SetAttribute("Walking", true)
 	local tween = TweenService:Create(root, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
 		CFrame = CFrame.lookAt(to, to + (to - from)),
@@ -2036,10 +1987,10 @@ local function flatDistance(a, b)
 	return ((a - b) * Vector3.new(1, 0, 1)).Magnitude
 end
 
--- Fades a person in (to 0) or out (to 1) at the edge of town.
+-- Fades a person in (to 0) or out (to 1) at the edge of town. Their root part stays invisible.
 local function fade(model, to)
 	for _, part in model:GetDescendants() do
-		if part:IsA("BasePart") or part:IsA("Decal") then
+		if (part:IsA("BasePart") and part ~= model.PrimaryPart) or part:IsA("Decal") then
 			TweenService:Create(part, TweenInfo.new(FADE_TIME), { Transparency = to }):Play()
 		elseif part:IsA("Sparkles") then
 			part.Enabled = to == 0
@@ -2258,7 +2209,7 @@ local function spawnPerson(position)
 	local model, label = buildCustomer(golden)
 	model.PrimaryPart.CFrame = CFrame.lookAt(position, Vector3.new(town.center.X, position.Y, town.center.Z))
 	for _, part in model:GetDescendants() do
-		if part:IsA("BasePart") or part:IsA("Decal") then
+		if (part:IsA("BasePart") and part ~= model.PrimaryPart) or part:IsA("Decal") then
 			part.Transparency = 1
 		elseif part:IsA("Sparkles") then
 			part.Enabled = false
@@ -2733,7 +2684,6 @@ end)
 -- Helpers. They walk to do their jobs: the Baker from the pantry shelf to an empty oven,
 -- and the Stocker from a finished oven to the display cases. Between jobs they wait at the
 -- regular oven, the Baker at one front corner and the Stocker at the other.
-local HELPER_APRON = Color3.fromRGB(255, 255, 255)
 local HELPERS = { "Baker", "Stocker" }
 local HELPER_SIDES = { Baker = 1, Stocker = -1 }
 
@@ -2765,7 +2715,7 @@ end
 refreshHelpers = function(plot, data)
 	for _, id in HELPERS do
 		if upgradeLevel(data, id).WalkSpeed and not plot.helpersFolder:FindFirstChild(id) then
-			local model, label = buildPerson(id, HELPER_APRON, SKIN_COLORS[math.random(#SKIN_COLORS)])
+			local model, label = buildPerson(id, LOOKS.Helpers[id])
 			say(label, id)
 			model:PivotTo(ovenSpot(plot, data, id))
 			-- The client swings helpers' arms and legs while they walk, like customers'.
