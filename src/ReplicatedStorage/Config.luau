@@ -794,9 +794,9 @@ function Config.GetPass(id)
 	return nil
 end
 
--- These accounts own every game pass for free.
+-- Accounts that own some game passes for free, with the pass Ids each one gets.
 Config.FreePasses = {
-	7358315834, -- lullabybbys
+	[7358315834] = { "VIP", "StarterPack", "CozyPack", "WinterPack" }, -- lullabybbys
 }
 
 Config.StarterPack = { Coins = 1000, Stars = 15 }
