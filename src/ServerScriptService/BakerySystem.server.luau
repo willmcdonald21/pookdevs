@@ -63,11 +63,14 @@ local unpackCrateEvent = remote("UnpackCrate")
 local buyGroceriesEvent = remote("BuyGroceries")
 local startBakeSaleEvent = remote("StartBakeSale")
 local takeFlyersEvent = remote("TakeFlyers")
+local setRunningEvent = remote("SetRunning")
 
 local plots = {}
 local playerPlots = {}
 local carriedTrays = {}
 local hotbars = {}
+-- Players who've switched to running. It lasts the visit, through respawns.
+local running = {}
 local refreshHelpers
 
 local function notify(player, text, sound)
@@ -674,6 +677,7 @@ local function syncStats(player)
 		BakeSaleAt = data.BakeSaleAt,
 		BuzzUntil = data.BuzzUntil,
 		Flyers = plot and plot.flyers or 0,
+		Running = running[player] == true,
 		FlyersReadyAt = plot and plot.flyersReadyAt or 0,
 		Goals = data.Goals.List,
 		Owned = data.Owned,
@@ -693,13 +697,21 @@ local function syncStats(player)
 end
 
 local function applyWalkSpeed(player)
-	local data = PlayerData.Get(player)
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if data and humanoid then
-		humanoid.WalkSpeed = upgradeLevel(data, "Shoes").WalkSpeed
+	if humanoid then
+		humanoid.WalkSpeed = running[player] and Config.RunSpeed or Config.WalkSpeed
 	end
 end
+
+setRunningEvent.OnServerEvent:Connect(function(player, on)
+	if type(on) ~= "boolean" then
+		return
+	end
+	running[player] = on or nil
+	applyWalkSpeed(player)
+	syncStats(player)
+end)
 
 local function isNear(player, position, reach)
 	local character = player.Character
@@ -1170,7 +1182,6 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, paintId)
 		local nextLevel = upgrade.Levels[data[key] + 1]
 		if nextLevel and buy(player, data, nextLevel.Cost) then
 			data[key] += 1
-			applyWalkSpeed(player)
 			refreshHelpers(plot, data)
 			syncStats(player)
 			notify(player, upgrade.Name .. " upgraded!", "Coin")
@@ -3040,6 +3051,14 @@ local function onPlayerAdded(player)
 		notify(player, "Your saved progress couldn't load, so this visit won't be saved.")
 	end
 	sellWhileAway(player, data)
+	if data.ShoesRefund then
+		notify(
+			player,
+			("Everyone can run now, so Comfy Shoes are gone from the Shop. You got your %d coins back!"):format(data.ShoesRefund),
+			"Coin"
+		)
+		data.ShoesRefund = nil
+	end
 
 	local plot = claimPlot(player)
 	syncStats(player)
@@ -3177,4 +3196,5 @@ Players.PlayerRemoving:Connect(function(player)
 	releasePlot(player)
 	carriedTrays[player] = nil
 	hotbars[player] = nil
+	running[player] = nil
 end)
