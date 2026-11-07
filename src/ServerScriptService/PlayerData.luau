@@ -161,6 +161,100 @@ local function convertLayout(data, savedStock)
 	data.Stock[starter.Key] = cleanStock(savedStock[starter.Key], #item.Slots)
 end
 
+-- Employees. Each one does a different job, so a new one gets the first job nobody has.
+local function firstFreeJob(employees)
+	for _, job in Config.Employees.Jobs do
+		local taken = false
+		for _, employee in employees do
+			taken = taken or employee.Job == job
+		end
+		if not taken then
+			return job
+		end
+	end
+	return ""
+end
+
+-- A name with its spaces tidied, cut to Config.Employees.NameLength characters, or nil
+-- when there's nothing left.
+local function cleanName(value)
+	if type(value) ~= "string" or not utf8.len(value) then
+		return nil
+	end
+	local name = value:gsub("%s+", " "):match("^ ?(.-) ?$")
+	if utf8.len(name) > Config.Employees.NameLength then
+		name = name:sub(1, utf8.offset(name, Config.Employees.NameLength + 1) - 1)
+	end
+	return name ~= "" and name or nil
+end
+
+-- A new employee in a random outfit, with a name none of the others has. New hires
+-- start without a hat.
+local function newEmployee(employees, job)
+	local taken = {}
+	for _, employee in employees do
+		taken[employee.Name] = true
+	end
+	local names = {}
+	for _, name in Config.Employees.Names do
+		if not taken[name] then
+			table.insert(names, name)
+		end
+	end
+	local look = {}
+	for _, category in Config.Wardrobe do
+		look[category.Id] = category.Id == "Hat" and 0 or category.Items[math.random(#category.Items)].Id
+	end
+	return { Name = names[math.random(#names)], Job = job or firstFreeJob(employees), Trained = false, Look = look }
+end
+
+-- Saves from before employees had a Baker Helper and a Stocker Helper instead, each with
+-- a level: 1 not hired, 2 hired, 3 walking faster. They become trained employees at 3.
+local function cleanEmployees(saved)
+	local employees = {}
+	if type(saved.Employees) ~= "table" then
+		for _, job in { "Baker", "Stocker" } do
+			local level = cleanLevel(saved[job .. "Level"], 3)
+			if level >= 2 then
+				local employee = newEmployee(employees, job)
+				employee.Trained = level == 3
+				table.insert(employees, employee)
+			end
+		end
+		return employees
+	end
+	for _, entry in saved.Employees do
+		if type(entry) == "table" and #employees < Config.Employees.Max then
+			local employee = newEmployee(employees, "")
+			employee.Name = cleanName(entry.Name) or employee.Name
+			employee.Trained = entry.Trained == true
+			local look = type(entry.Look) == "table" and entry.Look or {}
+			for _, category in Config.Wardrobe do
+				if Config.WardrobeItem(category.Id, look[category.Id]) then
+					employee.Look[category.Id] = look[category.Id]
+				end
+			end
+			local taken = false
+			for _, other in employees do
+				taken = taken or other.Job == entry.Job
+			end
+			if table.find(Config.Employees.Jobs, entry.Job) and not taken then
+				employee.Job = entry.Job
+			end
+			table.insert(employees, employee)
+		end
+	end
+	for _, employee in employees do
+		if employee.Job == "" then
+			employee.Job = firstFreeJob(employees)
+		end
+	end
+	return employees
+end
+
+PlayerData.CleanName = cleanName
+PlayerData.NewEmployee = newEmployee
+
 -- Tables with holes don't survive saving, so Placed and Stock use string keys.
 local function clean(saved)
 	saved = type(saved) == "table" and saved or {}
@@ -196,6 +290,9 @@ local function clean(saved)
 		DailyDay = cleanCount(saved.DailyDay),
 		DailyStreak = math.min(cleanCount(saved.DailyStreak), #Config.DailyRewards),
 		Goals = cleanGoals(saved.Goals),
+		-- Up to Config.Employees.Max of { Name, Job, Trained, Look }. Name is what the player
+		-- typed, and is filtered before anyone sees it.
+		Employees = cleanEmployees(saved),
 	}
 	-- The Baker helper re-bakes this recipe. 0 means nothing has been baked yet.
 	data.LastRecipe = math.min(cleanCount(saved.LastRecipe), data.RecipesUnlocked)
