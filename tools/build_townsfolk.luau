@@ -11,8 +11,8 @@ local ServerStorage = game:GetService("ServerStorage")
 local SEED = 2026
 local LOOK_COUNT = 36
 
+-- Brown Hair (62234425) is left out: its texture is missing from Roblox.
 local HAIR = {
-	62234425, -- Brown Hair
 	63690008, -- Pal Hair
 	376524487, -- Blonde Spiked Hair
 	376526888, -- Straight Blonde Hair
