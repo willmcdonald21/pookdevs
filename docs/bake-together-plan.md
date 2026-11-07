@@ -48,7 +48,7 @@ Playing with friends in the same shop is the strongest trend among new cozy tyco
   - **Baking:** `bakeEvent` and `startBake` use the owner's recipes, pantry, batch size and bake time, and the player's own Bake goal.
   - **`stockCase`:** moves the player's own tray into the owner's case stock.
   - **`shipEvent` and `newOrderEvent`:** use the packer's tray, coins, Stars and goal, and orders refill from the owner's save.
-  - **Crate and flyers:** they use `workPlot`. Flyers are handed out near anyone working in the bakery.
+  - **Crate and flyers:** they use `workPlot`. Whoever takes the flyers carries the stack and hands them out. If a co-baker holding it stops baking there, the owner takes it over.
 - **Customer sales:**
   - **Payouts:** the owner's bonus and each active co-baker's share are paid after the owner's sale.
   - **Rounding:** `earn` rounds down, so coins stay whole numbers.
