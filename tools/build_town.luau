@@ -157,8 +157,13 @@ end
 
 local spawn = workspace:FindFirstChild("SpawnLocation")
 if spawn then
-	-- Beside the fountain, clear of the benches.
+	-- Beside the fountain, clear of the benches. Players only wait here while their bakery
+	-- loads, or when all six are taken, so the pad is invisible and can be walked through.
 	spawn.CFrame = CFrame.new(14, 0.9, 14)
+	spawn.Transparency = 1
+	spawn.CanCollide = false
+	spawn.CanQuery = false
+	spawn.CastShadow = false
 end
 
 -- Grocery store. Local frame: floor center at the origin, +Z toward the plaza.
