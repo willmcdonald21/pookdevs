@@ -794,6 +794,11 @@ function Config.GetPass(id)
 	return nil
 end
 
+-- These accounts own every game pass for free.
+Config.FreePasses = {
+	7358315834, -- lullabybbys
+}
+
 Config.StarterPack = { Coins = 1000, Stars = 15 }
 
 -- Each box holds one kind of treat, so keep this at or above the number of recipes.
