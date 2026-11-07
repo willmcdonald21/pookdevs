@@ -61,6 +61,7 @@ local claimDailyEvent = remote("ClaimDaily")
 local claimGoalEvent = remote("ClaimGoal")
 local unpackCrateEvent = remote("UnpackCrate")
 local buyGroceriesEvent = remote("BuyGroceries")
+local startBakeSaleEvent = remote("StartBakeSale")
 
 local plots = {}
 local playerPlots = {}
@@ -669,6 +670,7 @@ local function syncStats(player)
 		Passes = PurchaseHandler.OwnedPasses(player),
 		Multiplier = coinMultiplier(player, data),
 		BoostUntil = data.BoostUntil,
+		BakeSaleAt = data.BakeSaleAt,
 		Rush = rushPower(data),
 		Goals = data.Goals.List,
 		Owned = data.Owned,
@@ -1556,6 +1558,85 @@ unpackCrateEvent.OnServerEvent:Connect(function(player)
 	end
 end)
 
+-- Bake Sale. While one is on, a banner above the bakery's sign tells everyone.
+local SALE_PINK = Color3.fromRGB(255, 120, 160)
+local SALE_CREAM = Color3.fromRGB(255, 250, 240)
+
+local function showSaleBanner(plot, on)
+	if on and not plot.saleBanner then
+		local banner = Instance.new("BillboardGui")
+		banner.Name = "SaleBanner"
+		-- Scale sizes on a BillboardGui are in studs.
+		banner.Size = UDim2.fromScale(15, 3)
+		banner.StudsOffset = Vector3.new(0, 4.4, 0)
+		banner.LightInfluence = 0
+		banner.MaxDistance = 250
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.fromScale(1, 1)
+		label.BackgroundColor3 = SALE_PINK
+		label.TextColor3 = SALE_CREAM
+		label.Font = Enum.Font.FredokaOne
+		label.TextScaled = true
+		label.Text = ("BAKE SALE · %d%% OFF"):format(math.floor(Config.BakeSale.Discount * 100 + 0.5))
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0.3, 0)
+		corner.Parent = label
+		local stroke = Instance.new("UIStroke")
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		stroke.Color = SALE_CREAM
+		stroke.Thickness = 3
+		stroke.Parent = label
+		local padding = Instance.new("UIPadding")
+		padding.PaddingLeft = UDim.new(0.05, 0)
+		padding.PaddingRight = UDim.new(0.05, 0)
+		padding.Parent = label
+		label.Parent = banner
+		banner.Parent = plot.model.Sign
+		plot.saleBanner = banner
+	elseif not on and plot.saleBanner then
+		plot.saleBanner:Destroy()
+		plot.saleBanner = nil
+	end
+end
+
+-- Shows the banner until the sale ends. Also runs when the owner comes back mid-sale.
+local function runBakeSale(plot, session, player)
+	local data = PlayerData.Get(player)
+	if not data or not bakeSaleOn(data) then
+		return
+	end
+	showSaleBanner(plot, true)
+	task.wait(data.BakeSaleAt + Config.BakeSale.Duration - os.time())
+	if plot.session == session then
+		showSaleBanner(plot, false)
+		syncStats(player)
+		notify(player, "The Bake Sale is over, and prices are back to normal")
+	end
+end
+
+startBakeSaleEvent.OnServerEvent:Connect(function(player)
+	local plot = playerPlots[player]
+	local data = PlayerData.Get(player)
+	if not plot or not data then
+		return
+	end
+	local readyAt = data.BakeSaleAt + Config.BakeSale.Cooldown
+	if os.time() < readyAt then
+		notify(player, ("Your next Bake Sale is ready in %d min"):format(math.ceil((readyAt - os.time()) / 60)))
+		return
+	end
+	data.BakeSaleAt = os.time()
+	task.spawn(runBakeSale, plot, plot.session, player)
+	syncStats(player)
+	notify(
+		player,
+		("Bake Sale! Everything is %d%% off, and more customers are on their way"):format(
+			math.floor(Config.BakeSale.Discount * 100 + 0.5)
+		),
+		"Ding"
+	)
+end)
+
 -- Customers
 local function buildPerson(name, shirt, skin)
 	local model = Instance.new("Model")
@@ -1872,6 +1953,9 @@ local function shopAt(plot, session, person)
 			return
 		end
 		local price = salePrice(data, recipe)
+		if bakeSaleOn(data) then
+			price = math.max(1, math.floor(price * (1 - Config.BakeSale.Discount)))
+		end
 		local stars = 0
 		if person.golden then
 			price *= Config.GoldenCustomer.PayScale
@@ -2497,6 +2581,7 @@ local function claimPlot(player)
 				fillOrder(plot, data, slot)
 			end
 			task.spawn(runCustomerSpawner, plot, plot.session, player)
+			task.spawn(runBakeSale, plot, plot.session, player)
 			refreshHelpers(plot, data)
 			task.spawn(runBaker, plot, plot.session, player)
 			task.spawn(runStocker, plot, plot.session, player)
@@ -2542,6 +2627,7 @@ local function releasePlot(player)
 	applyExpansion(plot, 0)
 	applyPaint(plot, nil)
 	removeCrate(plot)
+	showSaleBanner(plot, false)
 end
 
 -- Gives exclusive and game pass items to their owners, and removes them from anyone
