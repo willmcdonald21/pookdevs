@@ -1658,7 +1658,8 @@ local function buildCustomer(golden)
 end
 
 -- Customers walk at CustomerSpeed. Helpers pass their own speed.
-local function walkCustomer(model, to, speed)
+-- Passing stop lets the walk end early, where they are, as soon as stop returns true.
+local function walkCustomer(model, to, speed, stop)
 	local root = model.PrimaryPart
 	local from = root.Position
 	local distance = (to - from).Magnitude
@@ -1672,7 +1673,14 @@ local function walkCustomer(model, to, speed)
 		CFrame = CFrame.lookAt(to, to + (to - from)),
 	})
 	tween:Play()
-	task.wait(duration)
+	if stop then
+		local arriveAt = os.clock() + duration
+		while os.clock() < arriveAt and not stop() do
+			task.wait(0.1)
+		end
+	else
+		task.wait(duration)
+	end
 	tween:Cancel()
 	model:SetAttribute("Walking", false)
 end
@@ -1692,7 +1700,11 @@ end
 
 -- Walks around furniture inside the bakery, or around the fountain, benches and buildings
 -- outside, where each step follows the ground. If there's no way through, walks straight.
-local function walkAround(model, to, speed, outside)
+-- Passing stop ends the walk early, as in walkCustomer.
+local function walkAround(model, to, speed, outside, stop)
+	local function stopped()
+		return not model.Parent or (stop ~= nil and stop())
+	end
 	local path = PathfindingService:CreatePath(PATH_SETTINGS)
 	local ok = pcall(function()
 		path:ComputeAsync(model.PrimaryPart.Position - PATH_GROUND, to - PATH_GROUND)
@@ -1700,15 +1712,15 @@ local function walkAround(model, to, speed, outside)
 	if ok and path.Status == Enum.PathStatus.Success then
 		local waypoints = path:GetWaypoints()
 		for index = 2, #waypoints do
-			if not model.Parent then
+			if stopped() then
 				return
 			end
 			local point = waypoints[index].Position
-			walkCustomer(model, outside and groundPoint(point) or Vector3.new(point.X, to.Y, point.Z), speed)
+			walkCustomer(model, outside and groundPoint(point) or Vector3.new(point.X, to.Y, point.Z), speed, stop)
 		end
 	end
-	if model.Parent then
-		walkCustomer(model, to, speed)
+	if not stopped() then
+		walkCustomer(model, to, speed, stop)
 	end
 end
 
@@ -1932,11 +1944,14 @@ local function visitBakery(person)
 end
 
 -- A person strolls between a few spots, shopping whenever a bakery calls them in, then
--- walks out of town.
+-- walks out of town. Being called in stops a stroll where they are.
 local function runPerson(person)
 	local model = person.model
 	model.Parent = townsfolkFolder
 	fade(model, 0)
+	local function called()
+		return person.visit ~= nil
+	end
 	local stops = math.random(Config.Townsfolk.Stops[1], Config.Townsfolk.Stops[2])
 	while true do
 		if person.visit then
@@ -1946,7 +1961,7 @@ local function runPerson(person)
 			break
 		else
 			local spot = pickStroll()
-			walkAround(model, spot.Position, person.speed, true)
+			walkAround(model, spot.Position, person.speed, true, called)
 			if not person.visit then
 				turnTo(model, spot.Look)
 				local leaveAt = os.clock() + randomBetween(Config.Townsfolk.StopTime)
@@ -1993,6 +2008,12 @@ local function spawnPerson(position)
 	return person
 end
 
+local function sendVisitor(plot, session, person)
+	person.visit = plot
+	person.visitSession = session
+	plot.visitors += 1
+end
+
 -- Sends someone to a bakery: one of the three free townsfolk nearest its path, or a
 -- newcomer from the nearest edge of town when everyone's busy.
 local function requestCustomer(plot, session)
@@ -2006,9 +2027,7 @@ local function requestCustomer(plot, session)
 		return flatDistance(a.model.PrimaryPart.Position, plot.mouth) < flatDistance(b.model.PrimaryPart.Position, plot.mouth)
 	end)
 	local person = free[math.random(math.clamp(#free, 1, 3))] or spawnPerson(edgeNear(plot.mouth))
-	person.visit = plot
-	person.visitSession = session
-	plot.visitors += 1
+	sendVisitor(plot, session, person)
 end
 
 -- How many people should be strolling: more when more bakeries are open.
