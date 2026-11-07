@@ -34,6 +34,7 @@ local unpackCrateEvent = ReplicatedStorage:WaitForChild("UnpackCrate")
 local buyGroceriesEvent = ReplicatedStorage:WaitForChild("BuyGroceries")
 local startBakeSaleEvent = ReplicatedStorage:WaitForChild("StartBakeSale")
 local takeFlyersEvent = ReplicatedStorage:WaitForChild("TakeFlyers")
+local setRunningEvent = ReplicatedStorage:WaitForChild("SetRunning")
 
 local PINK = Color3.fromRGB(240, 150, 175)
 local BROWN = Color3.fromRGB(90, 60, 70)
@@ -173,6 +174,54 @@ for slot = 1, Config.HotbarSize do
 	end)
 	hotbarSlots[slot] = { box = box, stroke = stroke, icon = icon, count = count, recipeIndex = 0 }
 end
+
+-- Walk/Run switch, to the right of the hotbar. The server sets the speed, and the switch
+-- shows the new choice straight away.
+local moveSwitch = Instance.new("Frame")
+moveSwitch.Name = "MoveSwitch"
+moveSwitch.Size = UDim2.fromOffset(64, SLOT_SIZE)
+moveSwitch.Position = UDim2.new(0.5, HOTBAR_WIDTH / 2 + SLOT_GAP * 2, 1, -8)
+moveSwitch.AnchorPoint = Vector2.new(0, 1)
+moveSwitch.BackgroundTransparency = 1
+moveSwitch.Parent = gui
+
+local function moveButton(name, top)
+	local position = top and UDim2.new() or UDim2.new(0, 0, 0.5, 2)
+	local object = button(name .. "Button", UDim2.new(1, 0, 0.5, -2), position, TOP_LEFT, CREAM, moveSwitch)
+	object.Text = name
+	local stroke = Instance.new("UIStroke")
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Color = PINK
+	stroke.Thickness = SLOT_NORMAL_STROKE
+	stroke.Parent = object
+	return object
+end
+
+local walkButton = moveButton("Walk", true)
+local runButton = moveButton("Run", false)
+local isRunning = false
+
+local function showRunning(on)
+	isRunning = on
+	walkButton.BackgroundColor3 = on and CREAM or BLUE
+	walkButton.TextColor3 = on and BROWN or WHITE
+	runButton.BackgroundColor3 = on and GREEN or CREAM
+	runButton.TextColor3 = on and WHITE or BROWN
+end
+showRunning(false)
+
+local function setRunning(on)
+	if on ~= isRunning then
+		showRunning(on)
+		setRunningEvent:FireServer(on)
+	end
+end
+walkButton.Activated:Connect(function()
+	setRunning(false)
+end)
+runButton.Activated:Connect(function()
+	setRunning(true)
+end)
 
 -- Shows a treat in a ViewportFrame, seen from a little above.
 local function showTreat(viewport, recipeIndex)
@@ -1313,6 +1362,7 @@ refreshHotbarVisible = function()
 	local show = currentPanel == nil and not decorating
 	hotbar.Visible = show
 	trayLabel.Visible = show
+	moveSwitch.Visible = show
 end
 
 local function floorTop(plot)
@@ -1976,6 +2026,7 @@ end)
 -- State updates
 stateEvent.OnClientEvent:Connect(function(newState)
 	state = newState
+	showRunning(state.Running)
 	local multiplierText = state.Multiplier > 1 and (" x%d"):format(state.Multiplier) or ""
 	coinsLabel.Text = ("%d coins%s"):format(state.Coins, multiplierText)
 	starsLabel.Text = starText(state.Stars)
