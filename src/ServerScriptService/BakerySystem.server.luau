@@ -188,9 +188,21 @@ local function earn(player, data, amount)
 	return coins
 end
 
--- Days are counted in UTC, so everyone's new day starts at the same moment.
+-- Days start at midnight US Eastern time, so everyone's new day starts at the same moment.
+-- Servers have no time zone data, so daylight time is worked out here: EDT (UTC-4) runs from
+-- 2am on the 2nd Sunday of March (07:00 UTC) to 2am on the 1st Sunday of November (06:00 UTC),
+-- and EST (UTC-5) the rest of the year.
 local function today()
-	return os.time() // 86400
+	local now = os.time()
+	local year = DateTime.fromUnixTimestamp(now):ToUniversalTime().Year
+	local function nthSunday(month, n, hourUtc)
+		local first = DateTime.fromUniversalTime(year, month, 1).UnixTimestamp
+		-- 1970-01-01 was a Thursday, so (day + 4) % 7 is 0 on a Sunday.
+		local untilSunday = (7 - (first // 86400 + 4) % 7) % 7
+		return first + (untilSunday + 7 * (n - 1)) * 86400 + hourUtc * 3600
+	end
+	local summer = now >= nthSunday(3, 2, 7) and now < nthSunday(11, 1, 6)
+	return (now - (summer and 4 or 5) * 3600) // 86400
 end
 
 -- New goals each day. Rewards scale with the best recipe unlocked.
