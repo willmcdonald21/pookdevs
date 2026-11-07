@@ -175,6 +175,9 @@ local function clean(saved)
 		LayoutVersion = Layout.Version,
 		Receipts = {},
 		BoostUntil = cleanCount(saved.BoostUntil),
+		-- When the last Bake Sale started, so one can only start every Config.BakeSale.Cooldown.
+		BakeSaleAt = cleanCount(saved.BakeSaleAt),
+		BuzzUntil = cleanCount(saved.BuzzUntil),
 		StarterPackClaimed = saved.StarterPackClaimed == true,
 		-- True once the Luxury Oven has been bought.
 		LuxuryOven = saved.LuxuryOven == true,
