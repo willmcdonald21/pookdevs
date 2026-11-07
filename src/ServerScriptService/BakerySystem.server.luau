@@ -1,7 +1,8 @@
 -- Runs the bakeries: baking, display cases, shopping customers, deliveries,
 -- the shop, and placed items. All game state lives on the server.
 -- Prompts are always Enabled here; the client shows them based on each prompt's
--- Active attribute and the plot's OwnerId.
+-- Active attribute and the plot's OwnerId. Prompts with the CoBake attribute also show
+-- for the bakery's co-bakers.
 local CollectionService = game:GetService("CollectionService")
 local PathfindingService = game:GetService("PathfindingService")
 local Players = game:GetService("Players")
@@ -72,6 +73,12 @@ local hotbars = {}
 -- Players who've switched to running. It lasts the visit, through respawns.
 local running = {}
 local refreshHelpers
+-- Bake Together. coBakers maps each co-baker to the bakery they're working in, and
+-- lastAction to when they last did something there. friendPairs[a][b] is true when a and
+-- b are Roblox friends in this server.
+local coBakers = {}
+local lastAction = {}
+local friendPairs = {}
 
 local function notify(player, text, sound)
 	notifyEvent:FireClient(player, text, sound)
@@ -79,6 +86,53 @@ end
 
 local function setActive(prompt, active)
 	prompt:SetAttribute("Active", active)
+end
+
+-- The bakery a player is working in: the one they're co-baking in, or their own.
+local function workPlot(player)
+	return coBakers[player] or playerPlots[player]
+end
+
+local function coBakersOf(plot)
+	local list = {}
+	for coBaker, coPlot in coBakers do
+		if coPlot == plot then
+			table.insert(list, coBaker)
+		end
+	end
+	return list
+end
+
+-- Everyone working in a bakery: its owner first, then its co-bakers.
+local function workersOf(plot)
+	local list = coBakersOf(plot)
+	if plot.owner then
+		table.insert(list, 1, plot.owner)
+	end
+	return list
+end
+
+-- Co-bakers who've done something in the bakery recently. Only they share in its sales.
+local function activeCoBakers(plot)
+	local list = {}
+	for _, coBaker in coBakersOf(plot) do
+		if os.clock() - (lastAction[coBaker] or -math.huge) <= Config.CoBake.ActiveSeconds then
+			table.insert(list, coBaker)
+		end
+	end
+	return list
+end
+
+local function markActive(player)
+	lastAction[player] = os.clock()
+end
+
+local function friendBoost(player)
+	local count = 0
+	for _ in friendPairs[player] or {} do
+		count += 1
+	end
+	return math.min(Config.FriendBoost.Max, count * Config.FriendBoost.PerFriend)
 end
 
 local function upgradeLevel(data, id)
@@ -89,7 +143,8 @@ local function salePrice(data, recipe)
 	return math.floor(recipe.Price * (1 + upgradeLevel(data, "Ingredients").PriceBonus))
 end
 
--- 2x Coins and the timed boost each double coins earned from customers and deliveries.
+-- 2x Coins and the timed boost each double coins earned from customers and deliveries,
+-- and the Friend Boost adds a little for each friend in town.
 local function coinMultiplier(player, data)
 	local multiplier = 1
 	if PurchaseHandler.OwnsPass(player, "DoubleCoins") then
@@ -98,7 +153,7 @@ local function coinMultiplier(player, data)
 	if data.BoostUntil > os.time() then
 		multiplier *= 2
 	end
-	return multiplier
+	return multiplier * (1 + friendBoost(player))
 end
 
 local function bakeSaleOn(data)
@@ -125,8 +180,10 @@ local function maxVisitors(data)
 	return rushPower(data) > 1 and Config.MaxCustomersBoosted or Config.MaxCustomers
 end
 
+-- Coins are always whole. The tiny extra stops rounding error from losing a coin, as in
+-- 25 * 1.2 coming out a hair under 30.
 local function earn(player, data, amount)
-	local coins = amount * coinMultiplier(player, data)
+	local coins = math.floor(amount * coinMultiplier(player, data) + 1e-6)
 	data.Coins += coins
 	return coins
 end
@@ -294,13 +351,19 @@ local function ownedOvens(plot, data)
 	return ovens
 end
 
+-- Co-bakers are guided around the bakery they're working in, using its owner's ovens,
+-- cases and pantry, and their own tray.
 local function updateGuide(player)
-	local plot = playerPlots[player]
+	local plot = workPlot(player)
 	local data = PlayerData.Get(player)
+	local host = plot and plot.owner and PlayerData.Get(plot.owner)
+	if not host then
+		plot = nil
+	end
 	local hint, target = "", nil
 	local ready, idle, baking
 	if plot and data then
-		for _, oven in ownedOvens(plot, data) do
+		for _, oven in ownedOvens(plot, host) do
 			if oven.state == "ready" then
 				ready = ready or oven
 			elseif oven.state == "idle" then
@@ -316,7 +379,7 @@ local function updateGuide(player)
 		hint = ("Your %s batch is ready! Collect it from the %s"):format(ready.recipe.Name:lower(), ready.name:lower())
 		target = ready.model.Name
 	elseif trayTotal(data) > 0 then
-		local _, case = findCaseWithRoom(plot, data)
+		local _, case = findCaseWithRoom(plot, host)
 		if case then
 			hint = "Put your treats in a display case"
 			target = case.model.Name
@@ -326,7 +389,7 @@ local function updateGuide(player)
 		end
 	elseif not idle then
 		hint = ("Baking %s..."):format(baking.recipe.Name:lower())
-	elseif not canBakeAnything(data) then
+	elseif not canBakeAnything(host) then
 		hint = "Out of ingredients! Unpack your delivery crate or visit the grocery store"
 		target = "IngredientCrate"
 	else
@@ -639,7 +702,27 @@ local function freeStationSpot(plot, data, id)
 	return nil
 end
 
-local function syncStats(player)
+local function upgradeLevels(data)
+	local levels = {}
+	for _, upgrade in Config.Upgrades do
+		levels[upgrade.Id] = data[upgrade.Id .. "Level"]
+	end
+	return levels
+end
+
+local function deliveryOrders(plot)
+	local orders = {}
+	for slot = 1, #Config.DeliveryTiers do
+		local order = plot.orders[slot]
+		orders[slot] = order or { Waiting = true, Name = Config.DeliveryTiers[slot].Name }
+	end
+	return orders
+end
+
+-- Syncing a bakery's owner also syncs its co-bakers, who see the owner's pantry and
+-- orders. skipCoBakers stops two players baking in each other's bakeries from syncing
+-- each other forever.
+local function syncStats(player, skipCoBakers)
 	local data = PlayerData.Get(player)
 	if not data then
 		return
@@ -653,24 +736,36 @@ local function syncStats(player)
 		leaderstats.Coins.Value = data.Coins
 	end
 
-	local levels = {}
-	for _, upgrade in Config.Upgrades do
-		levels[upgrade.Id] = data[upgrade.Id .. "Level"]
-	end
 	local plot = playerPlots[player]
 	local orders = {}
+	local myCoBakers = {}
 	if plot then
 		updatePantryShelf(plot, data)
-		for slot = 1, #Config.DeliveryTiers do
-			local order = plot.orders[slot]
-			orders[slot] = order or { Waiting = true, Name = Config.DeliveryTiers[slot].Name }
+		orders = deliveryOrders(plot)
+		for _, coBaker in coBakersOf(plot) do
+			table.insert(myCoBakers, { UserId = coBaker.UserId, Name = coBaker.DisplayName })
 		end
+	end
+	-- What a co-baker needs from the bakery they're working in.
+	local work = nil
+	local coPlot = coBakers[player]
+	local host = coPlot and coPlot.owner and PlayerData.Get(coPlot.owner)
+	if host then
+		work = {
+			OwnerName = coPlot.owner.DisplayName,
+			RecipesUnlocked = host.RecipesUnlocked,
+			Levels = upgradeLevels(host),
+			Pantry = host.Pantry,
+			PantryCapacity = pantryCapacity(host),
+			Orders = deliveryOrders(coPlot),
+			BakeSaleAt = host.BakeSaleAt,
+		}
 	end
 	stateEvent:FireClient(player, {
 		Coins = data.Coins,
 		Stars = data.Stars,
 		RecipesUnlocked = data.RecipesUnlocked,
-		Levels = levels,
+		Levels = upgradeLevels(data),
 		Tray = data.Tray,
 		TrayCapacity = trayCapacity(data),
 		Pantry = data.Pantry,
@@ -697,9 +792,27 @@ local function syncStats(player)
 		CanAfford = canAffordUpgrade(data),
 		CanUnlockRecipe = canUnlockRecipe(data),
 		CanBuy = PlayerData.CanSave(player),
+		Work = work,
+		CoBakers = myCoBakers,
+		FriendBoost = friendBoost(player),
 	})
 	updateCarriedTray(player, data)
 	updateGuide(player)
+	if plot and not skipCoBakers then
+		for _, coBaker in coBakersOf(plot) do
+			syncStats(coBaker, true)
+		end
+	end
+end
+
+-- After a co-baker changes a bakery, both they and its owner need fresh state. Syncing the
+-- owner also syncs the co-bakers.
+local function syncWork(player, plot)
+	if plot and plot.owner and plot.owner ~= player then
+		syncStats(plot.owner)
+	else
+		syncStats(player)
+	end
 end
 
 local function applyWalkSpeed(player)
@@ -725,8 +838,10 @@ local function isNear(player, position, reach)
 	return root ~= nil and (root.Position - position).Magnitude <= reach
 end
 
+-- The owner can use any of their bakery's prompts, and co-bakers the ones marked CoBake.
 local function canUse(player, plot, prompt)
-	if player.UserId ~= plot.ownerId or not prompt:GetAttribute("Active") then
+	local allowed = player.UserId == plot.ownerId or (coBakers[player] == plot and prompt:GetAttribute("CoBake") == true)
+	if not allowed or not prompt:GetAttribute("Active") then
 		return false
 	end
 	return isNear(player, prompt.Parent.Position, prompt.MaxActivationDistance + REACH_BUFFER)
@@ -745,6 +860,7 @@ end)
 -- one bakes one batch at a time, and the Luxury Oven bakes faster.
 local function makeOven(model)
 	local body = model.Body
+	body.Prompt:SetAttribute("CoBake", true)
 	return {
 		model = model,
 		name = Layout.GetStation(model.Name).Name,
@@ -788,9 +904,12 @@ local function resetOven(oven)
 	setBurners(oven, false)
 end
 
--- Callers check missingIngredients first. The batch's ingredients are used up here.
+-- Callers check missingIngredients first. The batch's ingredients are used up here. A
+-- co-baker bakes with the owner's ingredients and upgrades, and it counts toward the
+-- co-baker's own goals.
 local function startBake(plot, oven, player, recipe)
-	local data = PlayerData.Get(player)
+	local data = PlayerData.Get(plot.owner)
+	local own = PlayerData.Get(player)
 	local session = plot.session
 	for id, count in recipe.Ingredients do
 		data.Pantry[id] -= count
@@ -805,8 +924,8 @@ local function startBake(plot, oven, player, recipe)
 	setOvenWindow(oven, Color3.fromRGB(255, 150, 60), Enum.Material.Neon)
 	setBurners(oven, true)
 	data.LastRecipe = table.find(Config.Recipes, recipe)
-	addGoalProgress(data, "Bake")
-	syncStats(player)
+	addGoalProgress(own, "Bake")
+	syncWork(player, plot)
 
 	task.spawn(function()
 		local finishAt = os.clock() + bakeTime(data, recipe) * oven.timeScale
@@ -829,14 +948,19 @@ local function startBake(plot, oven, player, recipe)
 		setOvenWindow(oven, Color3.fromRGB(255, 225, 130), Enum.Material.Neon)
 		setBurners(oven, false)
 		notify(player, nil, "Ding")
-		updateGuide(player)
+		updateGuide(plot.owner)
+		for _, coBaker in coBakersOf(plot) do
+			updateGuide(coBaker)
+		end
 	end)
 end
 
+-- Co-bakers collect onto their own tray and pay for Finish Now with their own Stars.
 local function onOvenPrompt(plot, oven, player)
 	if not canUse(player, plot, oven.prompt) then
 		return
 	end
+	markActive(player)
 	local data = PlayerData.Get(player)
 	if oven.state == "idle" then
 		openPanelEvent:FireClient(player, "Bake")
@@ -850,7 +974,7 @@ local function onOvenPrompt(plot, oven, player)
 		end
 		data.Stars -= Config.FinishBakeStars
 		oven.finishNow = true
-		syncStats(player)
+		syncWork(player, plot)
 	else
 		local space = trayCapacity(data) - trayTotal(data)
 		if space <= 0 then
@@ -867,7 +991,7 @@ local function onOvenPrompt(plot, oven, player)
 		else
 			resetOven(oven)
 		end
-		syncStats(player)
+		syncWork(player, plot)
 	end
 end
 
@@ -889,8 +1013,9 @@ local function nearestIdleOven(plot, data, player)
 end
 
 bakeEvent.OnServerEvent:Connect(function(player, index)
-	local plot = playerPlots[player]
-	local data = PlayerData.Get(player)
+	-- Co-bakers bake the owner's recipes with the owner's ingredients.
+	local plot = workPlot(player)
+	local data = plot and plot.owner and PlayerData.Get(plot.owner)
 	if not plot or not data or type(index) ~= "number" then
 		return
 	end
@@ -908,6 +1033,7 @@ bakeEvent.OnServerEvent:Connect(function(player, index)
 		notify(player, "You need " .. missing .. " more")
 		return
 	end
+	markActive(player)
 	startBake(plot, oven, player, recipe)
 end)
 
@@ -931,21 +1057,25 @@ local function refreshCase(plot, data, key)
 	case.prompt.ObjectText = ("%d/%d treats"):format(#stock, #case.slots)
 end
 
+-- Treats move from the player's own tray into the case, which belongs to the bakery's
+-- owner. For an owner, both are the same save.
 local function stockCase(plot, player, key)
 	local data = PlayerData.Get(player)
+	local host = plot.owner and PlayerData.Get(plot.owner)
 	local case = plot.cases[key]
-	if not case or not canUse(player, plot, case.prompt) then
+	if not case or not data or not host or not canUse(player, plot, case.prompt) then
 		return
 	end
 	if trayTotal(data) == 0 then
 		notify(player, "Your tray is empty. Bake something first!")
 		return
 	end
-	local stock = data.Stock[key]
+	local stock = host.Stock[key]
 	if #stock >= #case.slots then
 		notify(player, "This case is full")
 		return
 	end
+	markActive(player)
 	-- A selected hotbar box stocks only that treat. Otherwise the priciest treats go first.
 	local bar = hotbars[player]
 	local selected = bar and bar.Selected and bar.Slots[bar.Selected]
@@ -958,8 +1088,8 @@ local function stockCase(plot, player, key)
 		end
 	end
 	data.TutorialDone = true
-	refreshCase(plot, data, key)
-	syncStats(player)
+	refreshCase(plot, host, key)
+	syncWork(player, plot)
 end
 
 local function addCase(plot, key, model, origin, slots, promptParent, stand)
@@ -977,6 +1107,7 @@ local function addCase(plot, key, model, origin, slots, promptParent, stand)
 		prompt.Parent = promptParent
 	end
 	prompt:SetAttribute("Active", true)
+	prompt:SetAttribute("CoBake", true)
 	local connection = prompt.Triggered:Connect(function(player)
 		stockCase(plot, player, key)
 	end)
@@ -1388,10 +1519,11 @@ local function animateBox(plot)
 	lift:Play()
 end
 
+-- Whoever packs an order gets paid for it from their own tray, even in a friend's bakery.
 shipEvent.OnServerEvent:Connect(function(player, slot)
-	local plot = playerPlots[player]
+	local plot = workPlot(player)
 	local data = PlayerData.Get(player)
-	if not plot or not data or type(slot) ~= "number" then
+	if not plot or not plot.owner or not data or type(slot) ~= "number" then
 		return
 	end
 	local order = plot.orders[slot]
@@ -1409,13 +1541,14 @@ shipEvent.OnServerEvent:Connect(function(player, slot)
 	for index, count in order.Items do
 		data.Tray[index] -= count
 	end
+	markActive(player)
 	local earned = earn(player, data, order.Coins)
 	data.Stars += order.Stars
 	addGoalProgress(data, "Ship")
 	data.TutorialDone = true
-	queueOrder(plot, player, slot)
+	queueOrder(plot, plot.owner, slot)
 	animateBox(plot)
-	syncStats(player)
+	syncWork(player, plot)
 	if order.Stars > 0 then
 		local starWord = order.Stars == 1 and "Sugar Star" or "Sugar Stars"
 		notify(player, ("Shipped! +%d coins, +%d %s"):format(earned, order.Stars, starWord), "Coin")
@@ -1424,15 +1557,17 @@ shipEvent.OnServerEvent:Connect(function(player, slot)
 	end
 end)
 
+-- A co-baker can swap one of the owner's orders with their own Stars.
 newOrderEvent.OnServerEvent:Connect(function(player, slot)
-	local plot = playerPlots[player]
+	local plot = workPlot(player)
 	local data = PlayerData.Get(player)
-	if not plot or not data or type(slot) ~= "number" or not Config.DeliveryTiers[slot] then
+	local host = plot and plot.owner and PlayerData.Get(plot.owner)
+	if not plot or not data or not host or type(slot) ~= "number" or not Config.DeliveryTiers[slot] then
 		return
 	end
 	if buyWithStars(player, data, Config.NewOrderStars) then
-		fillOrder(plot, data, slot)
-		syncStats(player)
+		fillOrder(plot, host, slot)
+		syncWork(player, plot)
 	end
 end)
 
@@ -1528,6 +1663,7 @@ local function buildCrate(plot, contents)
 	prompt.RequiresLineOfSight = false
 	prompt:SetAttribute("Active", true)
 	prompt:SetAttribute("Action", "UnpackCrate")
+	prompt:SetAttribute("CoBake", true)
 	prompt.Parent = box
 
 	model.Parent = plot.model
@@ -1559,13 +1695,15 @@ local function runCrates(plot, session, player)
 	end
 end
 
+-- A co-baker unpacks the owner's crate into the owner's pantry.
 unpackCrateEvent.OnServerEvent:Connect(function(player)
-	local plot = playerPlots[player]
-	local data = PlayerData.Get(player)
+	local plot = workPlot(player)
+	local data = plot and plot.owner and PlayerData.Get(plot.owner)
 	local crate = plot and plot.crate
 	if not crate or not data or not isNear(player, crate.model.PrimaryPart.Position, CRATE_REACH) then
 		return
 	end
+	markActive(player)
 	local capacity = pantryCapacity(data)
 	local taken = {}
 	for id, count in crate.contents do
@@ -1582,8 +1720,10 @@ unpackCrateEvent.OnServerEvent:Connect(function(player)
 	else
 		setCrateLabel(crate)
 	end
-	syncStats(player)
-	if next(taken) == nil then
+	syncWork(player, plot)
+	if next(taken) == nil and plot.owner ~= player then
+		notify(player, "This pantry is full! Bake something first")
+	elseif next(taken) == nil then
 		notify(player, "Your pantry is full! Bake something or buy a Bigger Pantry")
 	elseif plot.crate then
 		notify(player, "Unpacked " .. Config.DescribeIngredients(taken) .. ". The rest didn't fit", "Coin")
@@ -1997,7 +2137,18 @@ local function shopAt(plot, session, person)
 				stars = 1
 			end
 		end
-		local coins = earn(owner, data, price)
+		-- Bake Together: the owner gets a bonus for each active co-baker, and each of them
+		-- gets a share of the price. These are new coins, so nobody earns less.
+		local helping = activeCoBakers(plot)
+		local coins = earn(owner, data, price * (1 + Config.CoBake.OwnerBonus * #helping))
+		for _, coBaker in helping do
+			local coData = PlayerData.Get(coBaker)
+			local share = coData and earn(coBaker, coData, price * Config.CoBake.Share) or 0
+			-- Syncing the owner below syncs co-bakers too.
+			if share > 0 then
+				notify(coBaker, ("+%d coins: you helped sell a %s"):format(share, recipe.Name:lower()), "Coin")
+			end
+		end
 		local tipCoins = 0
 		if gotWanted then
 			local share = Config.WantedTip.Min + math.random() * (Config.WantedTip.Max - Config.WantedTip.Min)
@@ -2407,6 +2558,7 @@ local function buildFlyerStand(plot)
 	prompt.RequiresLineOfSight = false
 	prompt:SetAttribute("Active", true)
 	prompt:SetAttribute("Action", "TakeFlyers")
+	prompt:SetAttribute("CoBake", true)
 	prompt.Parent = top
 
 	model.Parent = plot.model
@@ -2463,48 +2615,57 @@ local function nearestFree(point, reach)
 	return nearest
 end
 
+-- Anyone working in the bakery, its owner or a co-baker, hands out its flyers to the
+-- townsfolk they walk past.
 local function runFlyers(plot, session, player)
 	local nextHandOut, nextFullHint = 0, 0
 	while plot.session == session do
 		task.wait(0.25)
 		refreshFlyerStand(plot)
-		local character = player.Character
-		local root = character and character:FindFirstChild("HumanoidRootPart")
-		if plot.flyers > 0 and root and os.clock() >= nextHandOut then
-			local person = nearestFree(root.Position, Config.Flyers.Reach)
-			if person and plot.visitors >= Config.MaxCustomersBoosted then
-				if os.clock() >= nextFullHint then
-					nextFullHint = os.clock() + FLYER_FULL_HINT_GAP
-					notify(player, "Your bakery is full! Hand out more flyers in a moment")
-				end
-			elseif person then
-				nextHandOut = os.clock() + Config.Flyers.Gap
-				plot.flyers -= 1
-				sendVisitor(plot, session, person)
-				tossFlyer(root.Position + Vector3.new(0, 1, 0), person)
-				say(person.label, FLYER_SAYING)
-				task.delay(2.5, function()
-					if person.label.Text == FLYER_SAYING then
-						person.label.Visible = false
+		if plot.flyers > 0 and os.clock() >= nextHandOut then
+			for _, worker in workersOf(plot) do
+				local character = worker.Character
+				local root = character and character:FindFirstChild("HumanoidRootPart")
+				local person = root and nearestFree(root.Position, Config.Flyers.Reach)
+				local whose = worker == player and "Your" or "This"
+				if person and plot.visitors >= Config.MaxCustomersBoosted then
+					if os.clock() >= nextFullHint then
+						nextFullHint = os.clock() + FLYER_FULL_HINT_GAP
+						notify(worker, whose .. " bakery is full! Hand out more flyers in a moment")
 					end
-				end)
-				if plot.flyers > 0 then
-					notify(player, ("Handed out a flyer! %d left"):format(plot.flyers), "Ding")
-				else
-					notify(player, "That was your last flyer. Get more at the stand outside your door", "Ding")
+					break
+				elseif person then
+					nextHandOut = os.clock() + Config.Flyers.Gap
+					plot.flyers -= 1
+					sendVisitor(plot, session, person)
+					tossFlyer(root.Position + Vector3.new(0, 1, 0), person)
+					say(person.label, FLYER_SAYING)
+					task.delay(2.5, function()
+						if person.label.Text == FLYER_SAYING then
+							person.label.Visible = false
+						end
+					end)
+					if plot.flyers > 0 then
+						notify(worker, ("Handed out a flyer! %d left"):format(plot.flyers), "Ding")
+					else
+						notify(worker, "That was the last flyer. Get more at the stand outside the door", "Ding")
+					end
+					markActive(worker)
+					syncWork(worker, plot)
+					break
 				end
-				syncStats(player)
 			end
 		end
 	end
 end
 
 takeFlyersEvent.OnServerEvent:Connect(function(player)
-	local plot = playerPlots[player]
+	local plot = workPlot(player)
 	local stand = plot and plot.flyerStand
 	if not stand or not isNear(player, stand.model.PrimaryPart.Position, CRATE_REACH) then
 		return
 	end
+	markActive(player)
 	if os.time() < plot.flyersReadyAt then
 		notify(player, "The next stack of flyers isn't ready yet")
 		return
@@ -2512,7 +2673,7 @@ takeFlyersEvent.OnServerEvent:Connect(function(player)
 	plot.flyers = Config.Flyers.Stack
 	plot.flyersReadyAt = os.time() + Config.Flyers.Restock
 	refreshFlyerStand(plot)
-	syncStats(player)
+	syncWork(player, plot)
 	notify(player, ("You have %d flyers. Walk near people on the plaza to hand them out!"):format(plot.flyers), "Coin")
 end)
 
@@ -2772,6 +2933,220 @@ local function sendToPlot(player, plot)
 	end
 end
 
+-- Bake Together. A player asks at another bakery's door, and its owner answers in a
+-- popup. It's in a block so its locals don't count toward the script's limit of 200.
+-- Only buildDoorPrompt and endCoBakingFor are used outside it.
+local buildDoorPrompt, endCoBakingFor
+do
+	local coBakeRequestEvent = remote("CoBakeRequest")
+	local answerCoBakeEvent = remote("AnswerCoBake")
+	local leaveCoBakeEvent = remote("LeaveCoBake")
+	local removeCoBakerEvent = remote("RemoveCoBaker")
+	-- Open asks by the player asking, and when each player last asked.
+	local requests = {}
+	local lastAsk = {}
+	local nextRequestId = 0
+
+	-- leaving is true when the player is leaving the game, so they aren't sent anywhere.
+	local function stopCoBaking(player, leaving)
+		local plot = coBakers[player]
+		if not plot then
+			return
+		end
+		coBakers[player] = nil
+		lastAction[player] = nil
+		player:SetAttribute("CoBaking", nil)
+		if not leaving then
+			sendToPlot(player, playerPlots[player])
+			syncStats(player)
+		end
+		if plot.owner then
+			syncStats(plot.owner)
+		end
+	end
+
+	local function startCoBaking(player, plot)
+		local owner = plot.owner
+		coBakers[player] = plot
+		markActive(player)
+		player:SetAttribute("CoBaking", plot.model.Name)
+		sendToPlot(player, plot)
+		notify(player, ("You're baking with %s! Bake, fill their cases and pack their orders"):format(owner.DisplayName), "Ding")
+		notify(owner, ("%s is baking with you!"):format(player.DisplayName), "Ding")
+		syncStats(owner)
+	end
+
+	-- Why a player can't join this bakery right now, or nil if they can. An empty string
+	-- means there's nothing worth telling them.
+	local function coBakeProblem(player, plot)
+		local owner = plot.owner
+		if not owner or owner == player or not player.Parent then
+			return ""
+		end
+		if coBakers[player] == plot then
+			return "You're already baking here"
+		end
+		if coBakers[player] then
+			return ("You're baking with %s. Stop in the Friends menu first"):format(coBakers[player].owner.DisplayName)
+		end
+		if #coBakersOf(plot) >= Config.CoBake.Max then
+			return ("%s's bakery already has %d co-bakers"):format(owner.DisplayName, Config.CoBake.Max)
+		end
+		return nil
+	end
+
+	local function askToCoBake(player, plot)
+		if not plot.doorPart or not isNear(player, plot.doorPart.Position, plot.doorPart.Prompt.MaxActivationDistance + REACH_BUFFER) then
+			return
+		end
+		local problem = coBakeProblem(player, plot)
+		if problem then
+			if problem ~= "" then
+				notify(player, problem)
+			end
+			return
+		end
+		local owner = plot.owner
+		if requests[player] then
+			notify(player, ("Waiting for %s to answer..."):format(requests[player].owner.DisplayName))
+			return
+		end
+		local wait = Config.CoBake.AskCooldown - (os.clock() - (lastAsk[player] or -math.huge))
+		if wait > 0 then
+			notify(player, ("Wait %d seconds before asking again"):format(math.ceil(wait)))
+			return
+		end
+		-- An owner answers one request at a time.
+		for _, request in requests do
+			if request.owner == owner then
+				notify(player, ("%s is answering someone else. Try again in a moment"):format(owner.DisplayName))
+				return
+			end
+		end
+		lastAsk[player] = os.clock()
+		nextRequestId += 1
+		local request = { id = nextRequestId, owner = owner, plot = plot }
+		requests[player] = request
+		coBakeRequestEvent:FireClient(owner, { Id = request.id, Name = player.DisplayName, Seconds = Config.CoBake.AnswerSeconds })
+		notify(player, ("Asked %s. Waiting for an answer..."):format(owner.DisplayName))
+		task.delay(Config.CoBake.AnswerSeconds, function()
+			if requests[player] == request then
+				requests[player] = nil
+				notify(player, ("%s didn't answer this time"):format(owner.DisplayName))
+			end
+		end)
+	end
+
+	answerCoBakeEvent.OnServerEvent:Connect(function(owner, id, yes)
+		if type(id) ~= "number" or type(yes) ~= "boolean" then
+			return
+		end
+		for asker, request in requests do
+			if request.id == id and request.owner == owner then
+				requests[asker] = nil
+				if not yes then
+					notify(asker, ("%s said no thanks this time"):format(owner.DisplayName))
+					return
+				end
+				if request.plot.owner ~= owner then
+					return
+				end
+				local problem = coBakeProblem(asker, request.plot)
+				if problem then
+					if problem ~= "" then
+						notify(asker, problem)
+						notify(owner, ("%s can't join right now"):format(asker.DisplayName))
+					end
+					return
+				end
+				startCoBaking(asker, request.plot)
+				return
+			end
+		end
+	end)
+
+	leaveCoBakeEvent.OnServerEvent:Connect(function(player)
+		local plot = coBakers[player]
+		if not plot then
+			return
+		end
+		local owner = plot.owner
+		stopCoBaking(player)
+		notify(player, "You're back in your own bakery")
+		if owner then
+			notify(owner, ("%s stopped baking with you"):format(player.DisplayName))
+		end
+	end)
+
+	removeCoBakerEvent.OnServerEvent:Connect(function(owner, userId)
+		local plot = playerPlots[owner]
+		if not plot or type(userId) ~= "number" then
+			return
+		end
+		for _, coBaker in coBakersOf(plot) do
+			if coBaker.UserId == userId then
+				stopCoBaking(coBaker)
+				notify(coBaker, ("%s finished baking together for now. You're back in your own bakery"):format(owner.DisplayName))
+				notify(owner, ("%s isn't baking with you any more"):format(coBaker.DisplayName))
+			end
+		end
+	end)
+
+	-- Ends everything a leaving player is part of: co-baking somewhere, their own co-bakers,
+	-- and open requests.
+	function endCoBakingFor(player)
+		local plot = coBakers[player]
+		if plot then
+			stopCoBaking(player, true)
+			if plot.owner then
+				notify(plot.owner, ("%s left Sweetopia, so they've stopped baking with you"):format(player.DisplayName))
+			end
+		end
+		local own = playerPlots[player]
+		for _, coBaker in own and coBakersOf(own) or {} do
+			stopCoBaking(coBaker)
+			notify(coBaker, ("%s left Sweetopia, so you're back in your own bakery"):format(player.DisplayName))
+		end
+		requests[player] = nil
+		for asker, request in requests do
+			if request.owner == player then
+				requests[asker] = nil
+				notify(asker, ("%s left Sweetopia"):format(player.DisplayName))
+			end
+		end
+		lastAsk[player] = nil
+	end
+
+	-- An invisible spot in the doorway with the "Ask to Bake Together" prompt, which the
+	-- client shows only to other players.
+	function buildDoorPrompt(plot)
+		local part = Instance.new("Part")
+		part.Name = "BakeTogether"
+		part.Anchored = true
+		part.CanCollide = false
+		part.CanQuery = false
+		part.CanTouch = false
+		part.Transparency = 1
+		part.Size = Vector3.new(1, 1, 1)
+		part.CFrame = plot.door * CFrame.new(0, 2.5, 0)
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.Name = "Prompt"
+		prompt.ActionText = "Ask to Bake Together"
+		prompt.ObjectText = plot.owner.DisplayName .. "'s Bakery"
+		prompt.HoldDuration = 0.3
+		prompt.MaxActivationDistance = 8
+		prompt.RequiresLineOfSight = false
+		prompt:SetAttribute("Active", true)
+		prompt:SetAttribute("Door", true)
+		prompt.Triggered:Connect(function(player)
+			askToCoBake(player, plot)
+		end)
+		prompt.Parent = part
+		part.Parent = plot.model
+		return part
+	end
+end
+
 local function claimPlot(player)
 	for _, plot in plots do
 		if not plot.ownerId then
@@ -2804,6 +3179,7 @@ local function claimPlot(player)
 			plot.flyers, plot.flyersReadyAt = 0, 0
 			plot.flyerStand = buildFlyerStand(plot)
 			task.spawn(runFlyers, plot, plot.session, player)
+			plot.doorPart = buildDoorPrompt(plot)
 			refreshHelpers(plot, data)
 			task.spawn(runBaker, plot, plot.session, player)
 			task.spawn(runStocker, plot, plot.session, player)
@@ -2841,6 +3217,10 @@ local function releasePlot(player)
 	plot.cases = {}
 	plot.orders = {}
 	plot.placedFolder:ClearAllChildren()
+	if plot.doorPart then
+		plot.doorPart:Destroy()
+		plot.doorPart = nil
+	end
 	-- Customers on their way or inside see the session change and head back to the plaza.
 	plot.visitors = 0
 	plot.helpersFolder:ClearAllChildren()
@@ -3034,6 +3414,141 @@ local function onPassGranted(player, pass)
 	notify(player, ("Thank you! %s unlocked"):format(pass.Name), "Coin")
 end
 
+-- Friend Boost and invite rewards, in a block for the same reason as Bake Together.
+local addFriendPairs, removeFriendPairs, checkInvites
+do
+	-- Friend Boost. Each pair of players is checked once, when the second of them joins.
+	function addFriendPairs(player)
+		friendPairs[player] = friendPairs[player] or {}
+		for _, other in Players:GetPlayers() do
+			if other ~= player then
+				local ok, isFriend = pcall(player.IsFriendsWith, player, other.UserId)
+				if ok and isFriend and player.Parent and other.Parent and friendPairs[player] then
+					friendPairs[player][other] = true
+					friendPairs[other] = friendPairs[other] or {}
+					friendPairs[other][player] = true
+					for _, pair in { { player, other }, { other, player } } do
+						local percent = math.floor(friendBoost(pair[1]) * 100 + 0.5)
+						notify(pair[1], ("%s is in town! Friend Boost: +%d%% coins"):format(pair[2].DisplayName, percent), "Ding")
+						syncStats(pair[1])
+					end
+				end
+			end
+		end
+	end
+
+	function removeFriendPairs(player)
+		for other in friendPairs[player] or {} do
+			if friendPairs[other] then
+				friendPairs[other][player] = nil
+				syncStats(other)
+			end
+		end
+		friendPairs[player] = nil
+	end
+
+	-- Invite rewards. A friend's first visit through an invite pays them at once and adds
+	-- them to the inviter's record, so each invited friend is only ever counted once. The
+	-- inviter collects their Stars whenever they're in a server that can save.
+	local DataStoreService = game:GetService("DataStoreService")
+	local REFERRAL_HISTORY = 50
+	-- Invites waiting to be rewarded, by inviter: { Pending = { userId }, Claimed = { userId } }.
+	local referralStore
+	do
+		local ok, err = pcall(function()
+			referralStore = DataStoreService:GetDataStore("Referrals_v1")
+		end)
+		if not ok then
+			warn("BakerySystem: referral store unavailable: " .. tostring(err))
+		end
+	end
+
+	local function claimReferrals(player)
+		local data = PlayerData.Get(player)
+		if not referralStore or not data or not PlayerData.CanSave(player) then
+			return
+		end
+		local count = 0
+		local ok, err = pcall(function()
+			referralStore:UpdateAsync("inviter_" .. player.UserId, function(old)
+				count = 0
+				if type(old) ~= "table" or type(old.Pending) ~= "table" or #old.Pending == 0 then
+					return nil
+				end
+				old.Claimed = type(old.Claimed) == "table" and old.Claimed or {}
+				for _, userId in old.Pending do
+					table.insert(old.Claimed, userId)
+					count += 1
+				end
+				old.Pending = {}
+				while #old.Claimed > REFERRAL_HISTORY do
+					table.remove(old.Claimed, 1)
+				end
+				return old
+			end)
+		end)
+		if not ok then
+			warn(("BakerySystem: could not claim invite rewards for %s: %s"):format(player.Name, tostring(err)))
+			return
+		end
+		local rewarded = math.min(count, math.max(0, Config.Referral.MaxRewards - data.ReferralRewards))
+		if rewarded > 0 then
+			local stars = rewarded * Config.Referral.Stars
+			data.ReferralRewards += rewarded
+			data.Stars += stars
+			notify(player, ("Thanks for inviting friends to Sweetopia! +%d Sugar Stars"):format(stars), "Coin")
+			syncStats(player)
+		end
+	end
+
+	local function addReferral(inviterId, inviteeId)
+		if not referralStore then
+			return
+		end
+		local ok, err = pcall(function()
+			referralStore:UpdateAsync("inviter_" .. inviterId, function(old)
+				old = type(old) == "table" and old or {}
+				old.Pending = type(old.Pending) == "table" and old.Pending or {}
+				old.Claimed = type(old.Claimed) == "table" and old.Claimed or {}
+				if table.find(old.Pending, inviteeId) or table.find(old.Claimed, inviteeId) then
+					return nil
+				end
+				table.insert(old.Pending, inviteeId)
+				return old
+			end)
+		end)
+		if not ok then
+			warn(("BakerySystem: could not record an invite from %d: %s"):format(inviterId, tostring(err)))
+		end
+	end
+
+	-- Only a first visit counts, so players can't rejoin through invites for more Stars.
+	local function checkInvite(player, data, loaded)
+		if not loaded or data.LastSeen ~= 0 or data.ReferredBy ~= 0 then
+			return
+		end
+		local ok, joinData = pcall(player.GetJoinData, player)
+		local inviterId = ok and type(joinData) == "table" and tonumber(joinData.ReferredByPlayerId) or 0
+		if inviterId <= 0 or inviterId == player.UserId then
+			return
+		end
+		data.ReferredBy = inviterId
+		data.Stars += Config.Referral.Stars
+		notify(player, ("Welcome to Sweetopia! Your friend's invite gave you %d Sugar Stars"):format(Config.Referral.Stars), "Coin")
+		addReferral(inviterId, player.UserId)
+		local inviter = Players:GetPlayerByUserId(inviterId)
+		if inviter then
+			claimReferrals(inviter)
+		end
+	end
+
+	-- Pays a first visit through an invite, then collects any invite rewards waiting.
+	function checkInvites(player, data, loaded)
+		checkInvite(player, data, loaded)
+		claimReferrals(player)
+	end
+end
+
 local function onPlayerAdded(player)
 	local leaderstats = Instance.new("Folder")
 	leaderstats.Name = "leaderstats"
@@ -3041,11 +3556,12 @@ local function onPlayerAdded(player)
 	coins.Name = "Coins"
 	coins.Parent = leaderstats
 	leaderstats.Parent = player
+	task.spawn(addFriendPairs, player)
 
 	player.CharacterAdded:Connect(function()
 		carriedTrays[player] = nil
 		task.defer(function()
-			sendToPlot(player, playerPlots[player])
+			sendToPlot(player, workPlot(player))
 			applyWalkSpeed(player)
 			updateVipTag(player)
 			if PlayerData.Get(player) then
@@ -3084,9 +3600,15 @@ local function onPlayerAdded(player)
 	applyWalkSpeed(player)
 	player:SetAttribute("ShowWelcome", not data.TutorialDone)
 	offerDaily(player, data)
+	task.spawn(function()
+		checkInvites(player, data, loaded)
+		syncStats(player)
+	end)
 end
 
-for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
+-- A function rather than a loop body, so its locals don't count toward the script's
+-- limit of 200.
+local function setUpPlot(model)
 	local floor = model.Floor
 	local helpersFolder = Instance.new("Folder")
 	helpersFolder.Name = "Helpers"
@@ -3167,6 +3689,9 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 	setActive(plot.cookbookPrompt, false)
 	setActive(plot.pantryPrompt, false)
 	setActive(plot.packingPrompt, false)
+	-- Co-bakers can use the pantry shelf and packing table, but not the cookbook counter.
+	plot.pantryPrompt:SetAttribute("CoBake", true)
+	plot.packingPrompt:SetAttribute("CoBake", true)
 	plot.cookbookPrompt.Triggered:Connect(function(player)
 		if canUse(player, plot, plot.cookbookPrompt) then
 			openPanelEvent:FireClient(player, "Cookbook")
@@ -3183,6 +3708,10 @@ for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
 		end
 	end)
 	table.insert(plots, plot)
+end
+
+for _, model in Workspace:WaitForChild("Plots"):GetChildren() do
+	setUpPlot(model)
 end
 table.sort(plots, function(a, b)
 	return a.model.Name < b.model.Name
@@ -3211,6 +3740,8 @@ for _, player in Players:GetPlayers() do
 end
 
 Players.PlayerRemoving:Connect(function(player)
+	endCoBakingFor(player)
+	removeFriendPairs(player)
 	releasePlot(player)
 	carriedTrays[player] = nil
 	hotbars[player] = nil
