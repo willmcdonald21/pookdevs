@@ -368,21 +368,32 @@ end
 
 local rowOrder = 0
 -- actions is a list of { Text, Color, OnClick, TextColor }. OnClick is nil for a plain
--- label, and TextColor is white unless given.
-local function addRow(title, detail, actions)
+-- label, and TextColor is white unless given. icon is an optional image shown on the left.
+local function addRow(title, detail, actions, icon)
 	rowOrder += 1
 	local row = style(Instance.new("Frame"), "Row", UDim2.new(1, -12, 0, 62), UDim2.new(), TOP_LEFT, WHITE)
 	row.LayoutOrder = rowOrder
 	row.ZIndex = 6
 	row.Parent = rowList
 	local reserved = #actions * 104 + 10
-	local titleLabel =
-		label("Heading", UDim2.new(1, -reserved, 0, 28), UDim2.fromOffset(4, 3), TOP_LEFT, WHITE, BROWN, row)
+	local textX = 4
+	if icon then
+		local picture = Instance.new("ImageLabel")
+		picture.Name = "Icon"
+		picture.Size = UDim2.fromOffset(54, 54)
+		picture.Position = UDim2.fromOffset(4, 4)
+		picture.BackgroundTransparency = 1
+		picture.Image = icon
+		picture.ZIndex = 7
+		picture.Parent = row
+		textX = 62
+	end
+	local textWidth = UDim2.new(1, 4 - reserved - textX, 0, 28)
+	local titleLabel = label("Heading", textWidth, UDim2.fromOffset(textX, 3), TOP_LEFT, WHITE, BROWN, row)
 	titleLabel.Text = title
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 	titleLabel.ZIndex = 7
-	local detailLabel =
-		label("Detail", UDim2.new(1, -reserved, 0, 28), UDim2.fromOffset(4, 31), TOP_LEFT, WHITE, BROWN, row)
+	local detailLabel = label("Detail", textWidth, UDim2.fromOffset(textX, 31), TOP_LEFT, WHITE, BROWN, row)
 	detailLabel.Text = detail
 	detailLabel.TextXAlignment = Enum.TextXAlignment.Left
 	detailLabel.ZIndex = 7
