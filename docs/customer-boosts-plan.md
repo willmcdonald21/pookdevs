@@ -10,7 +10,7 @@ Normal times were far too busy. A decorated bakery got a customer every 2–4 se
 ## How it plays
 **Normal times**
 - A bakery with no decorations gets about one customer every 18 seconds. Charm brings that down to about 14 seconds at Charm 12, 13.5 at Charm 24, and never below 12. Every decoration still helps a little, but decor alone can't cause a stampede.
-- The waits vary a lot. About 15% of the time someone comes right behind the last person, and about 20% of the time there's a quiet spell of 35–70 seconds. Now and then a pair (12%) or a group of three (3%) arrives together.
+- The waits vary a lot. About 15% of the time someone comes right behind the last person, and about 20% of the time there's a quiet spell of roughly 25–65 seconds, shorter with more Charm. Now and then a pair (12%) or a group of three (3%) arrives together.
 - At most 3 customers are in the bakery at once, or 5 while any boost is on.
 
 **Bake Sale** (Boosts menu, free)
@@ -31,7 +31,7 @@ Normal times were far too busy. A decorated bakery got a customer every 2–4 se
 
 **Stacking:** boosts add together. A Bake Sale gives 1.5×, Buzz or the 2x Boost gives 2×, and all three at once give 3.5×, which is about as busy as the bakery was before this change.
 
-**Boosts menu:** a new button under Cookbook. It turns green and says "Boosts!" when a Bake Sale or a flyer stack is ready, and shows a countdown such as "Rush 1:24" while a boost is on. Inside are four rows: Bake Sale, Flyers, Bakery Buzz and 2x Boost.
+**Boosts menu:** a new button under Cookbook. It turns green and says "Boosts!" when a Bake Sale is ready, and turns gold with a countdown such as "Rush 1:24" while a boost is on. The flyer stand shows its own countdown, so a ready stack doesn't light the button. Inside, the first row says how many customers are coming compared with usual, such as "2.5x as many as usual right now". Then come the Bake Sale, Flyers, Bakery Buzz and 2x Boost rows, each with a live countdown.
 
 ## How it's built
 - **Config:** `CustomerInterval` 18, `CharmSpeed = { Max = 0.5, Half = 12 }` instead of `CharmSpeedBonus`, a table of wait kinds in `CustomerGap`, `MaxCustomers` 3 and `MaxCustomersBoosted` 5, and new `BakeSale`, `Flyers` and `Buzz` settings.
