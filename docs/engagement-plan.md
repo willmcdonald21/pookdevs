@@ -57,7 +57,7 @@ Pack and VIP items use the existing exclusive-item system:
 ## Gameplay additions
 1. **Daily reward:**
    - **Streak:** a 7-day login streak. Days 1–6 pay rising coins (100 → 600), and day 7 pays 5 Stars. Missing a day restarts it at day 1.
-   - **Claiming:** a popup on joining has a Claim button. Days are counted in UTC.
+   - **Claiming:** a popup on joining has a Claim button. Each day starts at midnight US Eastern time (EST or EDT), the same for daily goals. Until 2026-11-07 days were counted in UTC.
    - **Saved progress:** the last claim day (`DailyDay`) and the streak (`DailyStreak`).
 2. **Offline earnings:**
    - **How it works:** when you come back, customers are counted as having shopped while you were away. One treat sells per normal customer interval, up to 8 hours, and only from treats left in your cases.
