@@ -285,7 +285,8 @@ end
 -- item's origin on the floor, and the front is -Z. Display cases hold treats at their Slots.
 -- An item with OnlyFor = { userId, ... } is a free gift for those accounts, and
 -- nobody else can see or get it. An item with Pass = "<pass Id>" comes with that
--- game pass, and everyone can see it in the Decorate menu.
+-- game pass, and everyone can see it in the Decorate menu. If it has ExtraCoins, the
+-- pass's owners can buy more for that many coins each, but only one copy adds Charm.
 -- An item with Wall = true hangs on a wall and shows in the Decorate menu's Wall tab.
 -- Its origin is on the wall at the item's bottom, and its parts stick out toward -Z.
 -- On a display case, parts with Paint = true take the colour the owner paints it.
@@ -473,6 +474,7 @@ Config.Items = {
 		Id = "PartyBunting",
 		Name = "Party Bunting",
 		Pass = "StarterPack",
+		ExtraCoins = 150,
 		Charm = 3,
 		Parts = {
 			{ Kind = "Disc", Height = 5, Diameter = 0.25, X = -2.2, Y = 2.5, Color = rgb(255, 255, 255) },
@@ -488,6 +490,7 @@ Config.Items = {
 		Id = "Fireplace",
 		Name = "Fireplace",
 		Pass = "CozyPack",
+		ExtraCoins = 400,
 		Charm = 4,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(4.4, 3.6, 1.6), Y = 1.8, Color = rgb(170, 85, 70), Material = Enum.Material.Brick },
@@ -500,6 +503,7 @@ Config.Items = {
 		Id = "Bookshelf",
 		Name = "Bookshelf",
 		Pass = "CozyPack",
+		ExtraCoins = 300,
 		Charm = 4,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(3.6, 5, 1.4), Y = 2.5, Color = rgb(150, 100, 70), Material = Enum.Material.Wood },
@@ -515,6 +519,7 @@ Config.Items = {
 		Id = "Armchair",
 		Name = "Armchair",
 		Pass = "CozyPack",
+		ExtraCoins = 250,
 		Charm = 4,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(3, 1.2, 3), Y = 0.9, Color = rgb(235, 120, 150), Material = Enum.Material.Fabric },
@@ -528,6 +533,7 @@ Config.Items = {
 		Id = "ChristmasTree",
 		Name = "Christmas Tree",
 		Pass = "WinterPack",
+		ExtraCoins = 400,
 		Charm = 5,
 		Parts = {
 			{ Kind = "Disc", Height = 1, Diameter = 0.8, Y = 0.5, Color = rgb(120, 80, 55) },
@@ -545,6 +551,7 @@ Config.Items = {
 		Id = "Snowman",
 		Name = "Snowman",
 		Pass = "WinterPack",
+		ExtraCoins = 300,
 		Charm = 5,
 		Parts = {
 			{ Kind = "Ball", Diameter = 3, Y = 1.5, Color = rgb(250, 250, 255) },
@@ -562,6 +569,7 @@ Config.Items = {
 		Id = "GingerbreadHouse",
 		Name = "Gingerbread House",
 		Pass = "WinterPack",
+		ExtraCoins = 350,
 		Charm = 5,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(3.6, 2.6, 3.6), Y = 1.3, Color = rgb(170, 100, 55) },
