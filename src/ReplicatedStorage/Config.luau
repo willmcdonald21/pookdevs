@@ -166,6 +166,10 @@ Config.Recipes = {
 	},
 }
 
+-- How fast players move. The Walk/Run switch beside the hotbar picks one.
+Config.WalkSpeed = 16
+Config.RunSpeed = 28
+
 -- Level 1 of each upgrade is free. Cost is the price of reaching that level.
 Config.Upgrades = {
 	{
@@ -231,19 +235,6 @@ Config.Upgrades = {
 		},
 		Describe = function(level)
 			return ("Everything sells for %d%% more"):format(level.PriceBonus * 100)
-		end,
-	},
-	{
-		Id = "Shoes",
-		Name = "Comfy Shoes",
-		Levels = {
-			{ WalkSpeed = 16 },
-			{ WalkSpeed = 20, Cost = 40 },
-			{ WalkSpeed = 24, Cost = 300 },
-			{ WalkSpeed = 28, Cost = 1500 },
-		},
-		Describe = function(level)
-			return ("Walk at speed %d"):format(level.WalkSpeed)
 		end,
 	},
 	-- Helpers: level 1 means not hired. Delay is how long they wait before working.
