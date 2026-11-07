@@ -237,45 +237,145 @@ Config.Upgrades = {
 			return ("Everything sells for %d%% more"):format(level.PriceBonus * 100)
 		end,
 	},
-	-- Helpers: level 1 means not hired. Delay is how long they wait before working.
-	{
-		-- Helpers walk to do their jobs, so each level makes them walk faster. Customers walk
-		-- at CustomerSpeed and you start at 16.
-		Id = "Baker",
-		Name = "Baker Helper",
-		Levels = {
-			{},
-			{ WalkSpeed = 10, Cost = 2000 },
-			{ WalkSpeed = 18, Cost = 6000 },
-		},
-		Describe = function(level)
-			if not level.WalkSpeed then
-				return "Not hired yet"
-			end
-			return ("Fetches ingredients and bakes a random treat you have them for. Walks at speed %d"):format(level.WalkSpeed)
-		end,
-	},
-	{
-		Id = "Stocker",
-		Name = "Stocker Helper",
-		Levels = {
-			{},
-			{ WalkSpeed = 10, Cost = 3500 },
-			{ WalkSpeed = 18, Cost = 9000 },
-		},
-		Describe = function(level)
-			if not level.WalkSpeed then
-				return "Not hired yet"
-			end
-			return ("Carries finished batches to your cases. Walks at speed %d"):format(level.WalkSpeed)
-		end,
-	},
 }
 
 function Config.GetUpgrade(id)
 	for _, upgrade in Config.Upgrades do
 		if upgrade.Id == id then
 			return upgrade
+		end
+	end
+	return nil
+end
+
+-- Employees. A bakery can hire up to Max, and HireCost is the price of each hire in turn.
+-- Each employee does one job, and no two share a job, so with three jobs the player always
+-- covers one. Employees walk to their work at WalkSpeed (customers walk at CustomerSpeed
+-- and players at WalkSpeed above). Training one costs TrainCost and makes them walk at
+-- TrainedWalkSpeed and, as Cashier, check a customer out in TrainedCheckoutTime seconds
+-- instead of CheckoutTime. Players check customers out at once.
+Config.Employees = {
+	Max = 2,
+	HireCost = { 1000, 3000 },
+	TrainCost = 5000,
+	WalkSpeed = 10,
+	TrainedWalkSpeed = 18,
+	CheckoutTime = 2.5,
+	TrainedCheckoutTime = 1.5,
+	-- The longest name a player can give an employee, in characters.
+	NameLength = 20,
+	-- New hires take the first job nobody has, in this order.
+	Jobs = { "Cashier", "Baker", "Stocker" },
+	JobInfo = {
+		Cashier = "Checks customers out at the register",
+		Baker = "Fetches ingredients and bakes treats you have them for",
+		Stocker = "Carries finished batches to your display cases",
+	},
+	-- New hires get one of these names until the player picks another.
+	Names = { "Maple", "Biscuit", "Poppy", "Clover", "Mochi", "Hazel", "Sunny", "Pip", "Honey", "Ginger", "Cocoa", "Peaches" },
+}
+
+-- What employees can wear, all free and made by Roblox. A saved look has one Id from each
+-- category: an index for Skin, and a catalog asset id for the rest, where 0 means none.
+Config.Wardrobe = {
+	{
+		Id = "Skin",
+		Name = "Skin",
+		Items = {
+			{ Id = 1, Color = rgb(255, 224, 196) },
+			{ Id = 2, Color = rgb(245, 205, 165) },
+			{ Id = 3, Color = rgb(234, 184, 146) },
+			{ Id = 4, Color = rgb(225, 175, 130) },
+			{ Id = 5, Color = rgb(204, 142, 105) },
+			{ Id = 6, Color = rgb(190, 135, 95) },
+			{ Id = 7, Color = rgb(160, 110, 75) },
+			{ Id = 8, Color = rgb(150, 100, 70) },
+			{ Id = 9, Color = rgb(124, 84, 60) },
+			{ Id = 10, Color = rgb(105, 70, 50) },
+		},
+	},
+	{
+		Id = "Hair",
+		Name = "Hair",
+		Items = {
+			{ Id = 63690008, Name = "Pal Hair" },
+			{ Id = 376524487, Name = "Blonde Spiked Hair" },
+			{ Id = 376526888, Name = "Straight Blonde Hair" },
+			{ Id = 376548738, Name = "Brown Charmer Hair" },
+			{ Id = 451221329, Name = "True Blue Hair" },
+			{ Id = 1103003368, Name = "Orange Beanie with Black Hair" },
+			{ Id = 2956239660, Name = "Belle Of Belfast Long Red Hair" },
+			{ Id = 6993758617, Name = "Short and Sleek - Brown" },
+			{ Id = 9243987340, Name = "Short and Sleek - Blonde" },
+			{ Id = 9243992729, Name = "Short and Sleek - Black" },
+			{ Id = 9243976603, Name = "Short Fringe - Brown" },
+			{ Id = 7193397693, Name = "Short Fringe - Blonde" },
+			{ Id = 7193401217, Name = "Short Fringe - Black" },
+			{ Id = 9243983205, Name = "Short Fringe - Red" },
+			{ Id = 9244137452, Name = "Short Curls - Cool Brown" },
+			{ Id = 9244134513, Name = "Short Curls - Blonde" },
+			{ Id = 7193452166, Name = "Short Curls - Black" },
+			{ Id = 9244145658, Name = "Short Curls - Red" },
+			{ Id = 9244150641, Name = "Braided Hair - Cool Brown" },
+			{ Id = 9244148336, Name = "Braided Hair - Blonde" },
+			{ Id = 7193454569, Name = "Braided Hair - Black" },
+			{ Id = 7193455510, Name = "Braided Hair - Red" },
+			{ Id = 9244060144, Name = "Top Knot - Brown" },
+			{ Id = 9244057408, Name = "Top Knot - Blonde" },
+			{ Id = 9174354743, Name = "Top Knot - Black" },
+		},
+	},
+	{
+		Id = "Shirt",
+		Name = "Shirts",
+		Items = {
+			{ Id = 382537702, Name = "Teal Shirt" },
+			{ Id = 398635081, Name = "Blue Plaid Shirt" },
+			{ Id = 382537085, Name = "I <3 Pizza Shirt" },
+			{ Id = 4047884939, Name = "My Favorite Pizza Shirt" },
+			{ Id = 4047886060, Name = "Purple and Teal Top" },
+			{ Id = 398634295, Name = "Pastel Starburst Top with Gray Jacket" },
+			{ Id = 398633584, Name = "Denim Jacket with White Hoodie" },
+			{ Id = 144076436, Name = "Grey Striped Shirt with Denim Jacket" },
+			{ Id = 382538295, Name = "Guitar Tee with Black Jacket" },
+			{ Id = 144076358, Name = "Blue and Black Motorcycle Shirt" },
+			{ Id = 3670737444, Name = "Roblox Shirt - Simple Pattern" },
+		},
+	},
+	{
+		Id = "Pants",
+		Name = "Pants",
+		Items = {
+			{ Id = 382537569, Name = "Black Jeans" },
+			{ Id = 382538503, Name = "Black Jeans with Sneakers" },
+			{ Id = 398633812, Name = "Black Jeans with White Shoes" },
+			{ Id = 144076760, Name = "Dark Green Jeans" },
+			{ Id = 398634487, Name = "Beautiful You Jeans" },
+			{ Id = 398635338, Name = "Ripped Skater Pants" },
+			{ Id = 382537806, Name = "Jean Shorts" },
+			{ Id = 382537950, Name = "Jean Shorts with White Shoes" },
+		},
+	},
+	{
+		Id = "Hat",
+		Name = "Hats",
+		Items = {
+			{ Id = 0, Name = "No Hat" },
+			{ Id = 48474313, Name = "Red Roblox Cap" },
+			{ Id = 607702162, Name = "Roblox Baseball Cap" },
+		},
+	},
+}
+
+-- The wardrobe item with this Id in a category, or nil.
+function Config.WardrobeItem(categoryId, id)
+	for _, category in Config.Wardrobe do
+		if category.Id == categoryId then
+			for _, item in category.Items do
+				if item.Id == id then
+					return item
+				end
+			end
 		end
 	end
 	return nil
