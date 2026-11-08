@@ -99,6 +99,12 @@ end
 
 Config.StartingPantry = 15
 Config.GroceryBundle = 5
+
+-- Coins for any amount of an ingredient, at its bundle's price per item, rounded up.
+function Config.GroceryPrice(ingredient, amount)
+	return math.ceil(ingredient.BundlePrice * amount / Config.GroceryBundle)
+end
+
 -- A free crate of Size ingredients arrives outside the door every Interval seconds.
 Config.Crate = { Interval = 90, Size = 12 }
 
