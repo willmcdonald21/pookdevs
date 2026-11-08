@@ -448,11 +448,47 @@ local function displayCase(item, shelves, base)
 	return item
 end
 
+-- Stash Shelves are open wooden racks with four plank shelves of three treats, like the
+-- Tall Display Case, with a crate or two on top. The kick board at the bottom is the first
+-- part, because a shelf's first part holds its Stock prompt.
+local RACK_WOOD = rgb(196, 150, 105)
+local RACK_DARK = rgb(140, 98, 66)
+
+local function stashShelf(item)
+	item.Slots = {}
+	item.Parts = {
+		{ Kind = "Box", Size = Vector3.new(4.8, 0.6, 2.4), Y = 0.3, Color = RACK_DARK },
+		{ Kind = "Box", Size = Vector3.new(4.8, 6.6, 0.1), Y = 3.3, Z = 1.15, Color = rgb(235, 214, 182) },
+	}
+	for _, x in { -2.35, 2.35 } do
+		for _, z in { -1.1, 1.1 } do
+			table.insert(item.Parts, { Kind = "Box", Size = Vector3.new(0.25, 6.8, 0.25), X = x, Y = 3.4, Z = z, Color = RACK_DARK })
+		end
+	end
+	for shelf = 1, 4 do
+		local surface = 0.6 + (shelf - 1) * SHELF_GAP
+		if shelf > 1 then
+			table.insert(item.Parts, { Kind = "Box", Size = Vector3.new(4.7, 0.15, 2.3), Y = surface - 0.075, Color = RACK_WOOD })
+		end
+		for _, x in { -1.4, 0, 1.4 } do
+			table.insert(item.Slots, Vector3.new(x, surface + 0.25, -0.1))
+		end
+	end
+	table.insert(item.Parts, { Kind = "Box", Size = Vector3.new(5, 0.2, 2.6), Y = 6.7, Color = RACK_WOOD })
+	table.insert(item.Parts, { Kind = "Box", Size = Vector3.new(1.6, 0.9, 1.3), X = -1.1, Y = 7.25, Color = rgb(214, 178, 128) })
+	table.insert(item.Parts, { Kind = "Box", Size = Vector3.new(1.1, 0.6, 1), X = 0.9, Y = 7.1, Z = 0.2, Color = rgb(226, 196, 150) })
+	return item
+end
+
 Config.Items = {
 	-- Two shelves of three, the same height as before.
 	displayCase({ Id = "SmallCase", Name = "Display Case", Coins = 100, Charm = 0 }, 2, 2.2),
 	-- Four shelves of three. It stays under 7 studs, so wall pieces hung above it still fit.
 	displayCase({ Id = "BigCase", Name = "Tall Display Case", Coins = 800, Charm = 1 }, 4, 0.9),
+	-- An item with Room = "Stash" only goes in The Sweet Stash, and nothing else goes there.
+	-- It's bought at the stash's whiteboard, not in the Decorate menu. Customers never shop
+	-- from it: it holds treats until the Stocker takes them to a display case.
+	stashShelf({ Id = "StashShelf", Name = "Stash Shelf", Coins = 300, Charm = 0, Room = "Stash" }),
 	{
 		Id = "Rug",
 		Name = "Cozy Rug",
@@ -952,6 +988,16 @@ Config.LuxuryOven = {
 	Coins = 25000,
 	BakeTimeScale = 0.85,
 	Detail = "A gold second oven that bakes 15% faster. Bake two batches at once!",
+}
+
+-- A storage room through a door in the back wall, bought once in the Shop. Its whiteboard
+-- sells Stash Shelves and lets the owner choose which treat the Stocker puts in each
+-- display case. The Stocker puts treats that don't fit in a case on the shelves, and
+-- brings them out when a case has room.
+Config.Stash = {
+	Name = "The Sweet Stash",
+	Coins = 5000,
+	Detail = "A storage room through a back door. The Stocker keeps extra treats on its shelves until your cases have room",
 }
 
 -- Bigger bakeries, bought in order from the Decorate menu's Expansion tab. Each step moves
