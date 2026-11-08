@@ -121,8 +121,8 @@ local function cleanFloor(saved)
 end
 
 -- Keeps placed items that are owned and inside the walls, and moved stations. Wall items
--- keep their height and must still be on a wall. Overlaps were checked when each piece
--- was placed.
+-- keep their height and must still be on a wall, and Stash Shelves must be in The Sweet
+-- Stash. Overlaps were checked when each piece was placed.
 local function cleanLayout(data, savedPlaced, savedStock, savedStations)
 	local bounds = Layout.Bounds(data.Expansion)
 	local placedCounts = {}
@@ -134,7 +134,15 @@ local function cleanLayout(data, savedPlaced, savedStock, savedStations)
 			-- A paintable piece keeps the colour it was painted.
 			local paint = Config.IsPaintable(item) and Config.GetPaint(saved.Paint)
 			entry.Paint = paint and paint.Id or nil
-			local fits = Layout.Inside(Layout.Rect(Layout.ItemShape(item), entry), bounds)
+			-- A display case keeps the treat the Stocker fills it with (a Config.Recipes index).
+			local treat = saved.Treat
+			if item.Slots and not item.Room and type(treat) == "number" and Config.Recipes[treat] and treat % 1 == 0 then
+				entry.Treat = treat
+			end
+			local fits = Layout.Inside(Layout.Rect(Layout.ItemShape(item), entry), Layout.BoundsFor(item, data.Expansion))
+			if item.Room and not data.Stash then
+				fits = false
+			end
 			if item.Wall then
 				fits = entry.Y ~= nil and Layout.OnWall(Layout.ItemThing(key, entry), bounds)
 			end
@@ -327,6 +335,8 @@ local function clean(saved)
 		StarterPackClaimed = saved.StarterPackClaimed == true,
 		-- True once the Luxury Oven has been bought.
 		LuxuryOven = saved.LuxuryOven == true,
+		-- True once The Sweet Stash, the storage room behind the back wall, has been bought.
+		Stash = saved.Stash == true,
 		-- How many times the bakery has been made bigger. 0 is the starting size.
 		Expansion = math.clamp(math.floor(tonumber(saved.Expansion) or 0), 0, #Config.Expansions),
 		Paint = cleanPaint(saved.Paint),
