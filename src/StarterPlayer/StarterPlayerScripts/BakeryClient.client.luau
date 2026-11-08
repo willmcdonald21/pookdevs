@@ -838,30 +838,36 @@ local function whereIs(rect)
 	return text:sub(1, 1):upper() .. text:sub(2)
 end
 
--- Your display cases in a steady order, each with a numbered name and where it stands.
-local function paintableCases()
+-- Your paintable pieces, like display cases, in a steady order, each with a numbered name
+-- and where it stands.
+local function paintablePieces()
 	local keys = {}
 	for key, entry in state.Placed do
-		if Config.GetItem(entry.Id).Slots then
+		if Config.IsPaintable(Config.GetItem(entry.Id)) then
 			table.insert(keys, key)
 		end
 	end
 	table.sort(keys, function(a, b)
 		return (tonumber(a) or 0) < (tonumber(b) or 0)
 	end)
-	local counts, cases = {}, {}
+	local counts, pieces = {}, {}
 	for _, key in keys do
 		local entry = state.Placed[key]
 		local item = Config.GetItem(entry.Id)
 		counts[item.Id] = (counts[item.Id] or 0) + 1
 		local rect = Layout.Rect(Layout.ItemShape(item), entry)
-		table.insert(cases, { Key = key, Name = ("%s %d"):format(item.Name, counts[item.Id]), Where = whereIs(rect) })
+		table.insert(pieces, { Key = key, Item = item, Name = ("%s %d"):format(item.Name, counts[item.Id]), Where = whereIs(rect) })
 	end
-	return cases
+	return pieces
 end
 
+-- Laying floor tiles, set up with the other decorating further down.
+local tiling = {}
+
 -- The Paint tab lists everything that can be painted. Choosing one lists its colours, and
--- paintChoice remembers which it is: { Target = paint target } or { CaseKey, Name }.
+-- paintChoice remembers which it is: { Target = paint target }, { PieceKey, Item, Name }
+-- or { Floor = true } for the floor tile styles. Buying a paintable piece lists its
+-- colours too, with { NewItem = item, Price = its price as text }.
 local paintChoice = nil
 
 local function choosePaint(choice)
@@ -869,19 +875,75 @@ local function choosePaint(choice)
 	setPanel("Decorate")
 end
 
+-- A heading with Back, then a row per colour with a button in that colour showing
+-- priceText. current is the colour it has now and original the one it started in, if
+-- any. canUse can leave colours out, and onPick is given the chosen paint.
+local function colourRows(heading, detail, current, original, priceText, canUse, onPick)
+	addRow(heading, detail, {
+		{
+			Text = "Back",
+			Color = BLUE,
+			OnClick = function()
+				choosePaint(nil)
+			end,
+		},
+	})
+	for _, paint in Config.Paints do
+		if not canUse or canUse(paint) then
+			local isNow = paint.Id == current
+			local action = { Text = isNow and "Now" or priceText, Color = paint.Color, TextColor = textOn(paint.Color) }
+			if not isNow then
+				action.OnClick = function()
+					onPick(paint)
+				end
+			end
+			local about = ("Paint it %s"):format(paint.Name)
+			if isNow then
+				about = "Its colour now"
+			elseif paint.Id == original then
+				about = "Its original colour"
+			end
+			addRow(paint.Name, about, { action })
+		end
+	end
+end
+
 local function paintRows()
-	if paintChoice and paintChoice.CaseKey and not state.Placed[paintChoice.CaseKey] then
+	if paintChoice and paintChoice.PieceKey and not state.Placed[paintChoice.PieceKey] then
 		paintChoice = nil
 	end
-	if paintChoice then
-		local target, key = paintChoice.Target, paintChoice.CaseKey
-		local name, current, cost
-		if target then
-			name, current, cost = target.Name, state.Paint[target.Id] or target.Original, target.Coins
-		else
-			name, current, cost = paintChoice.Name, state.Placed[key].Paint or Config.CaseOriginalPaint, Config.CasePaintCoins
-		end
-		addRow("Painting: " .. name, "Pick a colour, or go back to the list", {
+	local target = paintChoice and paintChoice.Target
+	if target then
+		colourRows(
+			"Painting: " .. target.Name,
+			"Pick a colour, or go back to the list",
+			state.Paint[target.Id] or target.Original,
+			target.Original,
+			target.Coins .. " coins",
+			function(paint)
+				return Config.CanPaint(target, paint)
+			end,
+			function(paint)
+				purchaseEvent:FireServer("Paint", target.Id, paint.Id)
+			end
+		)
+		return
+	elseif paintChoice and paintChoice.PieceKey then
+		local key, item = paintChoice.PieceKey, paintChoice.Item
+		colourRows(
+			"Painting: " .. paintChoice.Name,
+			"Pick a colour, or go back to the list",
+			state.Placed[key].Paint or Config.OriginalPaint(item),
+			Config.OriginalPaint(item),
+			Config.PiecePaintCoins .. " coins",
+			nil,
+			function(paint)
+				purchaseEvent:FireServer("PaintCase", key, paint.Id)
+			end
+		)
+		return
+	elseif paintChoice and paintChoice.Floor then
+		addRow("Floor tiles", "Pick a style, then tap the tiles on your floor to lay it", {
 			{
 				Text = "Back",
 				Color = BLUE,
@@ -890,24 +952,38 @@ local function paintRows()
 				end,
 			},
 		})
-		for _, paint in Config.Paints do
-			if not target or Config.CanPaint(target, paint) then
-				local isNow = paint.Id == current
-				local action = { Text = isNow and "Now" or (cost .. " coins"), Color = paint.Color, TextColor = textOn(paint.Color) }
-				if not isNow then
-					action.OnClick = function()
-						if target then
-							purchaseEvent:FireServer("Paint", target.Id, paint.Id)
-						else
-							purchaseEvent:FireServer("PaintCase", key, paint.Id)
-						end
-					end
-				end
-				addRow(paint.Name, isNow and "Its colour now" or ("Paint it %s"):format(paint.Name), { action })
-			end
+		for _, style in Config.Floors do
+			local free = style.Coins == 0
+			local detail = free and "Your bakery's own floor. Takes tiles up for free"
+				or ("%d coins a tile%s"):format(style.Coins, style.Check and ", in a checkerboard" or "")
+			addRow(style.Name, detail, {
+				{
+					Text = free and "Free" or (style.Coins .. " coins"),
+					Color = style.Color,
+					TextColor = textOn(style.Color),
+					OnClick = function()
+						tiling.start(style)
+					end,
+				},
+			})
 		end
 		return
 	end
+	local cheapest, dearest = math.huge, 0
+	for _, style in Config.Floors do
+		if style.Coins > 0 then
+			cheapest, dearest = math.min(cheapest, style.Coins), math.max(dearest, style.Coins)
+		end
+	end
+	addRow("Floor tiles", ("Tile your floor in wood, marble, stone or pastels, %d to %d coins a tile"):format(cheapest, dearest), {
+		{
+			Text = "Tiles",
+			Color = BLUE,
+			OnClick = function()
+				choosePaint({ Floor = true })
+			end,
+		},
+	})
 	for _, target in Config.PaintTargets do
 		local current = Config.GetPaint(state.Paint[target.Id] or target.Original)
 		addRow(target.Name, ("%s now. %d coins to repaint"):format(current.Name, target.Coins), {
@@ -923,14 +999,14 @@ local function paintRows()
 	if state.LuxuryOven then
 		addRow(Config.LuxuryOven.Name, "Gold finish, can't be repainted", {})
 	end
-	for _, case in paintableCases() do
-		local current = Config.GetPaint(state.Placed[case.Key].Paint or Config.CaseOriginalPaint)
-		addRow(case.Name, ("%s. %s now, %d coins to repaint"):format(case.Where, current.Name, Config.CasePaintCoins), {
+	for _, piece in paintablePieces() do
+		local current = Config.GetPaint(state.Placed[piece.Key].Paint or Config.OriginalPaint(piece.Item))
+		addRow(piece.Name, ("%s. %s now, %d coins to repaint"):format(piece.Where, current.Name, Config.PiecePaintCoins), {
 			{
 				Text = "Paint",
 				Color = BLUE,
 				OnClick = function()
-					choosePaint({ CaseKey = case.Key, Name = case.Name })
+					choosePaint({ PieceKey = piece.Key, Item = piece.Item, Name = piece.Name })
 				end,
 			},
 		})
@@ -983,8 +1059,16 @@ end
 -- What selling one of an item pays, as text like "30 coins", or nil and why it can't be
 -- sold. Placed is true for a piece in the bakery, since your last display case stays.
 local function saleText(item, placed)
-	if placed and item.Slots and #paintableCases() <= 1 then
-		return nil, "Keep at least one display case so customers can shop"
+	if placed and item.Slots then
+		local cases = 0
+		for _, entry in state.Placed do
+			if Config.GetItem(entry.Id).Slots then
+				cases += 1
+			end
+		end
+		if cases <= 1 then
+			return nil, "Keep at least one display case so customers can shop"
+		end
 	end
 	local amount, currency = Config.SellValue(item, state.Owned[item.Id])
 	if not amount then
@@ -1049,8 +1133,8 @@ local function inventoryRows()
 end
 
 -- Floor has everything that stands on the floor, Wall has wall pieces, Inventory has the
--- pieces you've put away, Paint colours the walls, oven and cases, and Expansion makes the
--- bakery bigger.
+-- pieces you've put away, Paint colours the walls, oven and pieces and tiles the floor,
+-- and Expansion makes the bakery bigger.
 local DECOR_TABS = { "Floor", "Wall", "Inventory", "Paint", "Expansion" }
 local decorTab = "Floor"
 
@@ -1060,6 +1144,17 @@ function panels.Decorate()
 		decorTab = name
 		choosePaint(nil)
 	end)
+	-- Buying a paintable piece: its colour comes with it.
+	local newItem = paintChoice and paintChoice.NewItem
+	if newItem then
+		local heading = "New " .. newItem.Name
+		local detail = ("Pick its colour. It's free with the %s"):format(newItem.Name:lower())
+		colourRows(heading, detail, nil, Config.OriginalPaint(newItem), paintChoice.Price, nil, function(paint)
+			purchaseEvent:FireServer("Item", newItem.Id, paint.Id)
+			choosePaint(nil)
+		end)
+		return
+	end
 	if decorTab == "Paint" then
 		paintRows()
 		return
@@ -1069,6 +1164,15 @@ function panels.Decorate()
 	elseif decorTab == "Inventory" then
 		inventoryRows()
 		return
+	end
+	-- A paintable piece you can pay for asks for its colour first. Otherwise the server
+	-- buys it, or says what's missing.
+	local function buyItem(item, priceText, canPay)
+		if canPay and Config.IsPaintable(item) then
+			choosePaint({ NewItem = item, Price = priceText })
+		else
+			purchaseEvent:FireServer("Item", item.Id)
+		end
 	end
 	addRow("Move things", "Move or turn anything in your bakery, including the oven and counters", {
 		{
@@ -1096,12 +1200,13 @@ function panels.Decorate()
 				local pass = Config.GetPass(item.Pass)
 				if state.Passes[item.Pass] and item.ExtraCoins then
 					detail = ("Charm +%d for the first one only. You have %d to place"):format(item.Charm, stored)
+					local canPay = state.Coins >= item.ExtraCoins
 					actions = {
 						{
 							Text = item.ExtraCoins .. " coins",
-							Color = state.Coins >= item.ExtraCoins and GREEN or GREY,
+							Color = canPay and GREEN or GREY,
 							OnClick = function()
-								purchaseEvent:FireServer("Item", item.Id)
+								buyItem(item, item.ExtraCoins .. " coins", canPay)
 							end,
 						},
 					}
@@ -1133,7 +1238,7 @@ function panels.Decorate()
 						Text = priceText,
 						Color = canPay and (item.Stars and GOLD or GREEN) or GREY,
 						OnClick = function()
-							purchaseEvent:FireServer("Item", item.Id)
+							buyItem(item, priceText, canPay)
 						end,
 					},
 				}
@@ -2170,6 +2275,9 @@ barButton("Place", 2, GREEN)
 barButton("Sell", 3, GOLD)
 barButton("Inventory", 4, BLUE)
 barButton("Cancel", 5, PINK)
+-- Fill floor shows only while laying tiles, when Cancel doesn't.
+barButton("Fill", 5, GOLD)
+barButtons.Fill.Size = UDim2.fromOffset(200, 46)
 barButton("Done", 6, PINK)
 
 -- The hotbar shares the bottom of the screen with these buttons and sits under open menus.
@@ -2227,6 +2335,8 @@ end
 -- the bakery size they were drawn for.
 local gridLevel = nil
 
+-- The lines sit just above any floor tiles. While laying tiles, they mark the tiles'
+-- edges instead of every stud, and the doorway isn't tinted.
 local function showGrid(plot)
 	local top = floorTop(plot)
 	local bounds = myBounds()
@@ -2236,18 +2346,34 @@ local function showGrid(plot)
 	local columns, rows = bounds.MaxX - bounds.MinX, bounds.MaxZ - bounds.MinZ
 	local middleX = (bounds.MinX + bounds.MaxX) / 2
 	local middleZ = (bounds.MinZ + bounds.MaxZ) / 2
-	for column = 0, columns do
+	local xs, zs = {}, {}
+	if tiling.style then
+		for _, tile in Layout.Tiles(bounds) do
+			xs[tile.Rect.MinX], xs[tile.Rect.MaxX] = true, true
+			zs[tile.Rect.MinZ], zs[tile.Rect.MaxZ] = true, true
+		end
+	else
+		for column = 0, columns do
+			xs[bounds.MinX + column] = true
+		end
+		for row = 0, rows do
+			zs[bounds.MinZ + row] = true
+		end
+	end
+	for x in xs do
 		local line = markerPart("Line", Vector3.new(0.06, 0.02, rows), WHITE, 0.55, grid)
-		line.CFrame = top * CFrame.new(bounds.MinX + column, 0.02, middleZ)
+		line.CFrame = top * CFrame.new(x, 0.05, middleZ)
 	end
-	for row = 0, rows do
+	for z in zs do
 		local line = markerPart("Line", Vector3.new(columns, 0.02, 0.06), WHITE, 0.55, grid)
-		line.CFrame = top * CFrame.new(middleX, 0.02, bounds.MinZ + row)
+		line.CFrame = top * CFrame.new(middleX, 0.05, z)
 	end
-	local entrance = Layout.Entrance
-	local doorwaySize = Vector3.new(entrance.MaxX - entrance.MinX, 0.02, entrance.MaxZ - entrance.MinZ)
-	local doorway = markerPart("Doorway", doorwaySize, DOORWAY_COLOR, 0.55, grid)
-	doorway.CFrame = top * CFrame.new(Layout.Center(entrance) + Vector3.new(0, 0.03, 0))
+	if not tiling.style then
+		local entrance = Layout.Entrance
+		local doorwaySize = Vector3.new(entrance.MaxX - entrance.MinX, 0.02, entrance.MaxZ - entrance.MinZ)
+		local doorway = markerPart("Doorway", doorwaySize, DOORWAY_COLOR, 0.55, grid)
+		doorway.CFrame = top * CFrame.new(Layout.Center(entrance) + Vector3.new(0, 0.06, 0))
+	end
 	grid.Parent = Workspace
 end
 
@@ -2425,6 +2551,9 @@ end
 local function refreshBar()
 	placeBanner.Visible = decorating
 	placeBar.Visible = decorating
+	local laying = tiling.style ~= nil
+	barButtons.Rotate.Visible = not laying
+	barButtons.Fill.Visible = laying
 	barButtons.Rotate.BackgroundColor3 = (held and not held.wall) and BLUE or GREY
 	barButtons.Place.Visible = held ~= nil
 	local piece = held ~= nil and held.key ~= nil and held.stationId == nil
@@ -2441,9 +2570,12 @@ local function refreshBar()
 	end
 	barButtons.Cancel.Visible = held ~= nil
 	barButtons.Done.Visible = held == nil
-	if decorating and not held then
+	if decorating and not held and not laying then
 		placeBanner.Text = MOVE_HINT
 		placeBanner.BackgroundColor3 = GREEN
+	end
+	if laying then
+		tiling.refresh()
 	end
 end
 
@@ -2482,6 +2614,11 @@ local function holdItem(itemId, key)
 		entry = Layout.WallEntryAt(shape, Vector3.new(spot.X, WALL_START_HEIGHT, spot.Z), myBounds())
 	else
 		entry = Layout.EntryAt(shape, pointInFront(plot), 0, myBounds())
+	end
+	-- A new piece shows the colour it will be: the newest one bought or put away for it.
+	if not key then
+		local spare = state.SparePaint[itemId]
+		paint = spare and Config.GetPaint(spare[#spare])
 	end
 	local ghost = makeGhost(ItemBuilder.Build(item, 1, CFrame.new(), false, paint and paint.Color))
 	hold({
@@ -2570,6 +2707,9 @@ local function setDecorating(on)
 			grid = nil
 		end
 		hoverHighlight.Adornee = nil
+		tiling.style = nil
+		tiling.fillUntil = 0
+		tiling.hover.Parent = nil
 	end
 	refreshHotbarVisible()
 	refreshBar()
@@ -2580,6 +2720,9 @@ startPlacing = function(itemId)
 	setPanel(nil)
 	if not myPlot() then
 		return
+	end
+	if tiling.style then
+		setDecorating(false)
 	end
 	setDecorating(true)
 	drop(false)
@@ -2604,6 +2747,97 @@ local function surfacePointAt(plot, ray)
 	params.FilterDescendantsInstances = surfaces
 	local result = Workspace:Raycast(ray.Origin, ray.Direction * 500, params)
 	return result and floorTop(plot):PointToObjectSpace(result.Position)
+end
+
+-- Laying floor tiles. tiling.style is the floor style being laid, or nil. A tap or click
+-- lays the tile under it, and dragging with a mouse lays each tile it crosses. sent holds
+-- the tiles sent during a drag, so each is sent once, and fillUntil is when Fill floor
+-- stops waiting for its second tap.
+tiling.style = nil
+tiling.dragging = false
+tiling.sent = {}
+tiling.fillUntil = 0
+-- A see-through tile in the style, under the mouse, showing how it will look.
+tiling.hover = markerPart("TileHover", Vector3.one, WHITE, 0.35, nil)
+
+function tiling.start(style)
+	setPanel(nil)
+	if not myPlot() then
+		return
+	end
+	setDecorating(false)
+	tiling.style = style
+	setDecorating(true)
+end
+
+-- How many tiles Fill floor would change, and what it would cost.
+function tiling.fillCost()
+	local style = tiling.style
+	local count = 0
+	for _, tile in Layout.Tiles(myBounds()) do
+		if (state.Floor[tile.Key] or "Original") ~= style.Id then
+			count += 1
+		end
+	end
+	return count, count * style.Coins
+end
+
+-- The banner and the Fill floor button, which reads "Sure?" while it waits.
+function tiling.refresh()
+	local style = tiling.style
+	local count, cost = tiling.fillCost()
+	local asking = os.clock() < tiling.fillUntil
+	local free = style.Coins == 0
+	barButtons.Fill.Text = asking and "Sure?" or (free and "Clear floor" or ("Fill floor: %s coins"):format(withCommas(cost)))
+	barButtons.Fill.BackgroundColor3 = count > 0 and GOLD or GREY
+	if asking then
+		placeBanner.Text = free and ("Take up all %d tiles? Tap Sure? to do it"):format(count)
+			or ("Lay %s on %d tiles for %s coins? Tap Sure? to do it"):format(style.Name, count, withCommas(cost))
+		placeBanner.BackgroundColor3 = GOLD
+	elseif os.clock() >= bannerHintUntil then
+		placeBanner.Text = free and "Tap or drag across tiles to take them up"
+			or ("Laying %s, %d coins a tile. Tap or drag across your floor"):format(style.Name, style.Coins)
+		placeBanner.BackgroundColor3 = GREEN
+	end
+end
+
+function tiling.tileAt(plot, ray)
+	local point = surfacePointAt(plot, ray)
+	return point and Layout.TileAt(point, myBounds())
+end
+
+-- Lays the style on the tile a ray points at, unless it's that style already.
+function tiling.layAt(plot, ray)
+	local style = tiling.style
+	local tile = tiling.tileAt(plot, ray)
+	if not tile or tiling.sent[tile.Key] or (state.Floor[tile.Key] or "Original") == style.Id then
+		return
+	end
+	if state.Coins < style.Coins then
+		placeBanner.Text = ("You need %d more coins for a tile"):format(style.Coins - state.Coins)
+		placeBanner.BackgroundColor3 = BLOCKED_COLOR
+		bannerHintUntil = os.clock() + BANNER_HINT_TIME
+		return
+	end
+	if tiling.dragging then
+		tiling.sent[tile.Key] = true
+	end
+	purchaseEvent:FireServer("Floor", style.Id, { tile.Key })
+end
+
+function tiling.showHover(plot, ray)
+	local tile = tiling.tileAt(plot, ray)
+	local hover = tiling.hover
+	if not tile then
+		hover.Parent = nil
+		return
+	end
+	local rect = tile.Rect
+	hover.Size = Vector3.new(rect.MaxX - rect.MinX, 0.04, rect.MaxZ - rect.MinZ)
+	hover.CFrame = floorTop(plot) * CFrame.new(Layout.Center(rect) + Vector3.new(0, 0.06, 0))
+	hover.Color = Config.TileColor(tiling.style, tile.I, tile.J)
+	hover.Material = tiling.style.Material
+	hover.Parent = Workspace
 end
 
 -- The nearest piece the pointer passes through. Each piece is a box made of its grid
@@ -2735,6 +2969,32 @@ barButtons.Inventory.Activated:Connect(function()
 		drop(true)
 	end
 end)
+-- The first tap shows the total, and a second tap within a few seconds lays every tile.
+barButtons.Fill.Activated:Connect(function()
+	local style = tiling.style
+	if not style then
+		return
+	end
+	if tiling.fillCost() == 0 then
+		placeBanner.Text = style.Coins == 0 and "There are no tiles to take up"
+			or ("Your whole floor is %s already"):format(style.Name)
+		bannerHintUntil = os.clock() + BANNER_HINT_TIME
+		return
+	end
+	if os.clock() < tiling.fillUntil then
+		tiling.fillUntil = 0
+		purchaseEvent:FireServer("FloorFill", style.Id)
+	else
+		local asking = os.clock() + Config.FloorFill.ConfirmSeconds
+		tiling.fillUntil = asking
+		task.delay(Config.FloorFill.ConfirmSeconds, function()
+			if tiling.fillUntil == asking then
+				refreshBar()
+			end
+		end)
+	end
+	refreshBar()
+end)
 barButtons.Done.Activated:Connect(function()
 	setDecorating(false)
 end)
@@ -2756,6 +3016,11 @@ RunService.RenderStepped:Connect(function()
 	end
 	local mouse = UserInputService:GetMouseLocation()
 	if pointerOverGui(mouse - GuiService:GetGuiInset()) then
+		tiling.hover.Parent = nil
+		return
+	end
+	if tiling.style then
+		tiling.showHover(plot, Workspace.CurrentCamera:ViewportPointToRay(mouse.X, mouse.Y))
 		return
 	end
 	local thing = pieceOnRay(plot, Workspace.CurrentCamera:ViewportPointToRay(mouse.X, mouse.Y))
@@ -2783,7 +3048,11 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	if input.KeyCode == Enum.KeyCode.R then
 		rotateHeld()
 	elseif input.UserInputType == Enum.UserInputType.MouseButton1 and plot then
-		if held then
+		if tiling.style then
+			tiling.dragging = true
+			tiling.sent = {}
+			tiling.layAt(plot, Workspace.CurrentCamera:ScreenPointToRay(input.Position.X, input.Position.Y))
+		elseif held then
 			local point = screenPoint(plot, input.Position)
 			if point then
 				moveHeldTo(point)
@@ -2803,6 +3072,10 @@ end)
 
 UserInputService.InputChanged:Connect(function(input)
 	local plot = myPlot()
+	local moved = input.UserInputType == Enum.UserInputType.MouseMovement
+	if tiling.dragging and tiling.style and plot and moved and not pointerOverGui(input.Position) then
+		tiling.layAt(plot, Workspace.CurrentCamera:ScreenPointToRay(input.Position.X, input.Position.Y))
+	end
 	if dragOffset and held and plot and input.UserInputType == Enum.UserInputType.MouseMovement then
 		local point = screenPoint(plot, input.Position)
 		if point then
@@ -2814,6 +3087,7 @@ end)
 UserInputService.InputEnded:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		dragOffset = nil
+		tiling.dragging = false
 	end
 end)
 
@@ -2826,7 +3100,9 @@ UserInputService.TouchTap:Connect(function(positions, processed)
 	end
 	local position = positions[1]
 	local ray = Workspace.CurrentCamera:ScreenPointToRay(position.X, position.Y)
-	if held then
+	if tiling.style then
+		tiling.layAt(plot, ray)
+	elseif held then
 		local point = surfacePointAt(plot, ray)
 		if point then
 			moveHeldTo(point)
