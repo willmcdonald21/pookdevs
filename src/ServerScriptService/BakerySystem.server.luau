@@ -2216,9 +2216,79 @@ function checkout.wait(plot, session, person)
 	return person.paid
 end
 
+-- Seats. After paying, a customer sits at a random free seat, on a piece with Seats in
+-- Config, for a while before leaving. plot.seated holds whoever has each seat, by the
+-- piece's key and the seat's number, as in "3:1".
+local seats = {}
+-- How far a sitting person's root is above the top of the seat, so that in Roblox's sit
+-- pose their legs rest on it.
+seats.HEIGHT = 1.5
+
+-- Every free seat in the bakery, with its piece's model and where the piece stands.
+function seats.free(plot, data)
+	local free = {}
+	for key, entry in data.Placed do
+		local item = Config.GetItem(entry.Id)
+		local model = item and item.Seats and plot.placedFolder:FindFirstChild("Placed_" .. key)
+		if model then
+			local origin = Layout.CFrame(plot.floorTop, Layout.ItemShape(item), entry)
+			for index, seat in item.Seats do
+				local id = key .. ":" .. index
+				if not plot.seated[id] then
+					table.insert(free, { id = id, seat = seat, model = model, origin = origin })
+				end
+			end
+		end
+	end
+	return free
+end
+
+-- Walks a person to a random free seat and sits them down for SitTime seconds, then stands
+-- them up where they stepped in. They get up early if the piece is moved or put away, or
+-- the owner leaves. Does nothing when every seat is taken.
+function seats.sit(plot, session, person, data)
+	local free = seats.free(plot, data)
+	if #free == 0 then
+		return
+	end
+	local choice = free[math.random(#free)]
+	local seat, model = choice.seat, person.model
+	local root = model.PrimaryPart
+	plot.seated[choice.id] = person
+	local function moved()
+		return plot.session ~= session or choice.model.Parent ~= plot.placedFolder
+	end
+	-- Where they step in from, kept inside the walls, and the seat at standing height.
+	local from = plot.floorTop:PointToObjectSpace(choice.origin * Vector3.new(seat.From.X, 0, seat.From.Z))
+	local stand = floorPoint(plot, checkout.insideWalls(data, from), CUSTOMER_HEIGHT)
+	local over = choice.origin * Vector3.new(seat.At.X, CUSTOMER_HEIGHT, seat.At.Z)
+	local look = choice.origin:VectorToWorldSpace(seat.Look)
+	walkAround(model, stand, person.speed, false, moved)
+	if not moved() then
+		walkCustomer(model, over, person.speed, moved)
+	end
+	if not moved() then
+		local top = choice.origin * (seat.At + Vector3.new(0, seats.HEIGHT, 0))
+		person.label.Visible = false
+		TweenService:Create(root, TweenInfo.new(0.4), { CFrame = CFrame.lookAt(top, top + look) }):Play()
+		model:SetAttribute("Sitting", true)
+		local getUpAt = os.clock() + randomBetween(Config.SitTime)
+		while os.clock() < getUpAt and not moved() do
+			task.wait(0.25)
+		end
+		model:SetAttribute("Sitting", false)
+		TweenService:Create(root, TweenInfo.new(0.4), { CFrame = CFrame.lookAt(over, over + look) }):Play()
+		task.wait(0.4)
+		walkCustomer(model, stand, person.speed)
+	end
+	if plot.seated[choice.id] == person then
+		plot.seated[choice.id] = nil
+	end
+end
+
 -- Inside a bakery: a case with the treat they want if there is one, then the line at the
--- register to pay. They settle for something else if their treat isn't there, and tip
--- when it is. Stops early if the owner leaves.
+-- register to pay, then a seat for a while if one is free. They settle for something else
+-- if their treat isn't there, and tip when it is. Stops early if the owner leaves.
 local function shopAt(plot, session, person)
 	local model, label = person.model, person.label
 	local wanted = person.wants
@@ -2264,6 +2334,7 @@ local function shopAt(plot, session, person)
 			return
 		end
 		task.wait(0.8)
+		seats.sit(plot, session, person, data)
 	else
 		say(label, "Nothing to buy!")
 		task.wait(1.2)
@@ -3649,6 +3720,7 @@ local function releasePlot(player)
 		plot.doorPart = nil
 	end
 	-- Customers on their way or inside see the session change and head back to the plaza.
+	plot.seated = {}
 	plot.line = {}
 	plot.cashierSlot, plot.cashierReady = nil, false
 	setActive(plot.registerPrompt, false)
@@ -4069,6 +4141,8 @@ local function setUpPlot(model)
 		door = floor.CFrame * CFrame.new(0, 0.6, 19),
 		-- Where the bakery's path meets the plaza, set by setUpTown.
 		mouth = nil,
+		-- Customers sitting down, by seat. See seats.
+		seated = {},
 		-- Customers waiting to pay, first in line first. See checkout.
 		line = {},
 		-- The register's Body part and its Check out prompt, set up below.
