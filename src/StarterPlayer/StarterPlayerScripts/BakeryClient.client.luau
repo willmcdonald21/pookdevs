@@ -656,27 +656,120 @@ function panels.Pantry()
 	addRow("Bigger Pantry", "Buy it in the Shop to store more of each", {})
 end
 
-function panels.Grocery()
-	panelTitle.Text = "Grocery Store"
-	addHeader(("Bundles of %d. Your pantry holds %d of each"):format(Config.GroceryBundle, state.PantryCapacity))
-	for _, ingredient in Config.Ingredients do
-		local have = state.Pantry[ingredient.Id]
-		local amount = math.min(Config.GroceryBundle, state.PantryCapacity - have)
-		local detail = ("You have %d of %d"):format(have, state.PantryCapacity)
-		if amount <= 0 then
-			addRow(ingredient.Name, detail, { { Text = "Full", Color = GREY } })
-		else
-			-- Same price per item as the server charges for a partly full pantry.
-			local price = math.ceil(ingredient.BundlePrice * amount / Config.GroceryBundle)
-			addRow(("%s x%d"):format(ingredient.Name, amount), detail, {
-				{
-					Text = price .. " coins",
-					Color = state.Coins >= price and GREEN or GREY,
-					OnClick = function()
-						buyGroceriesEvent:FireServer(ingredient.Id)
-					end,
-				},
-			})
+-- The grocery store. Each ingredient has its bundle button and, when more than a bundle
+-- fits, a fill-up button on its left. Buy all at the top fills every ingredient, after a
+-- box over the menu shows the total. The box closes with the menu (see setPanel).
+do
+	local box = style(
+		Instance.new("Frame"),
+		"Confirm",
+		UDim2.fromOffset(360, 200),
+		UDim2.fromScale(0.5, 0.5),
+		Vector2.new(0.5, 0.5),
+		CREAM
+	)
+	box.Active = true
+	box.Visible = false
+	box.ZIndex = 12
+	box.Parent = panel
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = PINK
+	stroke.Thickness = 3
+	stroke.Parent = box
+	local question = label("Question", UDim2.new(1, -16, 0, 64), UDim2.fromOffset(8, 10), TOP_LEFT, CREAM, BROWN, box)
+	question.ZIndex = 13
+	local note = label("Note", UDim2.new(1, -16, 0, 34), UDim2.fromOffset(8, 78), TOP_LEFT, CREAM, BROWN, box)
+	note.ZIndex = 13
+	local no = button("No", UDim2.new(0.5, -12, 0, 52), UDim2.new(0, 8, 1, -10), Vector2.new(0, 1), PINK, box)
+	no.Text = "No"
+	no.ZIndex = 13
+	local yes = button("Yes", UDim2.new(0.5, -12, 0, 52), UDim2.new(1, -8, 1, -10), Vector2.new(1, 1), GREEN, box)
+	yes.Text = "Yes"
+	yes.ZIndex = 13
+
+	-- How many ingredients filling the pantry takes, and what they cost.
+	local function everything()
+		local count, total = 0, 0
+		for _, ingredient in Config.Ingredients do
+			local room = state.PantryCapacity - state.Pantry[ingredient.Id]
+			if room > 0 then
+				count += room
+				total += Config.GroceryPrice(ingredient, room)
+			end
+		end
+		return count, total
+	end
+
+	local function updateBox()
+		local count, total = everything()
+		if count == 0 then
+			box.Visible = false
+			return
+		end
+		question.Text = ("Buy %d ingredients for %s coins?"):format(count, withCommas(total))
+		local short = total - state.Coins
+		note.Text = short > 0 and ("You need %s more coins"):format(withCommas(short)) or "This fills your whole pantry"
+		yes.BackgroundColor3 = short > 0 and GREY or GREEN
+		yes.AutoButtonColor = short <= 0
+	end
+
+	no.Activated:Connect(function()
+		box.Visible = false
+	end)
+	yes.Activated:Connect(function()
+		local count, total = everything()
+		if count > 0 and total <= state.Coins then
+			buyGroceriesEvent:FireServer("All", total)
+			box.Visible = false
+		end
+	end)
+
+	function panels.Grocery()
+		panelTitle.Text = "Grocery Store"
+		local fillAll = everything() > 0 and {
+			Text = "Buy all",
+			Color = GOLD,
+			OnClick = function()
+				updateBox()
+				box.Visible = true
+			end,
+		} or { Text = "Full", Color = GREY }
+		addRow("Buy all", ("Fills every ingredient up to %d"):format(state.PantryCapacity), { fillAll })
+		addHeader(("Bundles of %d. Your pantry holds %d of each"):format(Config.GroceryBundle, state.PantryCapacity))
+		for _, ingredient in Config.Ingredients do
+			local have = state.Pantry[ingredient.Id]
+			local space = state.PantryCapacity - have
+			local amount = math.min(Config.GroceryBundle, space)
+			local detail = ("You have %d of %d"):format(have, state.PantryCapacity)
+			if amount <= 0 then
+				addRow(ingredient.Name, detail, { { Text = "Full", Color = GREY } })
+			else
+				local price = Config.GroceryPrice(ingredient, amount)
+				local actions = {
+					{
+						Text = price .. " coins",
+						Color = state.Coins >= price and GREEN or GREY,
+						OnClick = function()
+							buyGroceriesEvent:FireServer(ingredient.Id)
+						end,
+					},
+				}
+				-- When more than a bundle fits, this one fills the rest in one go.
+				if space > Config.GroceryBundle then
+					local fillPrice = Config.GroceryPrice(ingredient, space)
+					table.insert(actions, {
+						Text = ("x%d\n%d coins"):format(space, fillPrice),
+						Color = state.Coins >= fillPrice and GREEN or GREY,
+						OnClick = function()
+							buyGroceriesEvent:FireServer(ingredient.Id, "Fill")
+						end,
+					})
+				end
+				addRow(("%s x%d"):format(ingredient.Name, amount), detail, actions)
+			end
+		end
+		if box.Visible then
+			updateBox()
 		end
 	end
 end
@@ -1488,9 +1581,11 @@ setPanel = function(name)
 	if not state then
 		return
 	end
-	-- Opening a menu starts the Paint tab at its list, not partway through a choice.
+	-- Opening a menu starts the Paint tab at its list, not partway through a choice, and
+	-- closes the grocery store's Buy all box.
 	if name ~= currentPanel then
 		paintChoice = nil
+		panel.Confirm.Visible = false
 	end
 	currentPanel = name
 	local open = name ~= nil
