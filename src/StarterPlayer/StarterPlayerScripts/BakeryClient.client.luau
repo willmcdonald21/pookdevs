@@ -568,6 +568,9 @@ local startPlacing
 local wardrobe
 
 local panels = {}
+-- The Sweet Stash: placing Stash Shelves in its room, and Customize mode, where tapping a
+-- display case chooses its treat. Its functions are defined further down.
+local stash = {}
 
 function panels.Shop()
 	panelTitle.Text = "Bakery Shop"
@@ -588,6 +591,21 @@ function panels.Shop()
 		else
 			addRow(upgrade.Name, upgrade.Describe(upgrade.Levels[levelIndex]), { { Text = "Max", Color = GREY } })
 		end
+	end
+	-- The Sweet Stash is bought once.
+	local room = Config.Stash
+	if state.Stash then
+		addRow(room.Name, "Bought! It's through the door in your back wall", { { Text = "Owned", Color = GREY } })
+	else
+		addRow(room.Name, room.Detail, {
+			{
+				Text = withCommas(room.Coins) .. " coins",
+				Color = state.Coins >= room.Coins and GREEN or GREY,
+				OnClick = function()
+					purchaseEvent:FireServer("Stash")
+				end,
+			},
+		})
 	end
 end
 
@@ -1059,10 +1077,11 @@ end
 -- What selling one of an item pays, as text like "30 coins", or nil and why it can't be
 -- sold. Placed is true for a piece in the bakery, since your last display case stays.
 local function saleText(item, placed)
-	if placed and item.Slots then
+	if placed and item.Slots and not item.Room then
 		local cases = 0
 		for _, entry in state.Placed do
-			if Config.GetItem(entry.Id).Slots then
+			local piece = Config.GetItem(entry.Id)
+			if piece.Slots and not piece.Room then
 				cases += 1
 			end
 		end
@@ -1183,8 +1202,10 @@ function panels.Decorate()
 			end,
 		},
 	})
+	-- Stash Shelves are bought at The Sweet Stash's whiteboard instead.
 	for _, item in Config.Items do
-		if Config.IsAllowed(item, player.UserId) and (item.Wall == true) == (decorTab == "Wall") then
+		local tab = (item.Wall == true) == (decorTab == "Wall")
+		if Config.IsAllowed(item, player.UserId) and tab and not item.Room then
 			local owned = state.Owned[item.Id]
 			local stored = owned - placedCount(item.Id)
 			local detail
@@ -1254,6 +1275,77 @@ function panels.Decorate()
 			end
 			addRow(item.Name, detail, actions)
 		end
+	end
+end
+
+-- The Sweet Stash's whiteboard: Stash Shelves to buy and place, and Customize mode.
+function panels.Whiteboard()
+	panelTitle.Text = Config.Stash.Name
+	local shelf = Config.GetItem("StashShelf")
+	local stored = state.Owned[shelf.Id] - placedCount(shelf.Id)
+	local actions = {
+		{
+			Text = shelf.Coins .. " coins",
+			Color = state.Coins >= shelf.Coins and GREEN or GREY,
+			OnClick = function()
+				purchaseEvent:FireServer("Item", shelf.Id)
+			end,
+		},
+	}
+	if stored > 0 then
+		table.insert(actions, {
+			Text = "Place",
+			Color = BLUE,
+			OnClick = function()
+				startPlacing(shelf.Id)
+			end,
+		})
+	end
+	addRow(shelf.Name, ("Holds %d extra treats for the Stocker. You have %d to place"):format(#shelf.Slots, stored), actions)
+	addRow("Customize store shelves", "Choose which treat the Stocker puts in each display case", {
+		{
+			Text = "Start",
+			Color = BLUE,
+			OnClick = function()
+				stash.startMarking()
+			end,
+		},
+	})
+end
+
+-- Choosing the one treat the Stocker puts in the display case tapped in Customize mode.
+function panels.CaseTreat()
+	local key = stash.caseKey
+	local entry = key and state.Placed[key]
+	if not entry then
+		panelTitle.Text = "Display case"
+		addRow("That case has moved", "Close this and tap it again", {})
+		return
+	end
+	panelTitle.Text = Config.GetItem(entry.Id).Name .. ": which treat?"
+	local function choose(treat)
+		local chosen = entry.Treat == treat
+		return {
+			{
+				Text = chosen and "Chosen" or "Choose",
+				Color = chosen and GREY or GREEN,
+				OnClick = function()
+					placeEvent:FireServer("Treat", key, treat)
+					setPanel(nil)
+				end,
+			},
+		}
+	end
+	addRow("Any treat", "First come, first served: the Stocker puts any treat here", choose(nil))
+	for index = 1, state.RecipesUnlocked do
+		local recipe = Config.Recipes[index]
+		local row = addRow(recipe.Name .. "s", ("The Stocker only puts %ss here"):format(recipe.Name:lower()), choose(index), "")
+		local picture = Instance.new("ViewportFrame")
+		picture.Size = UDim2.fromScale(1, 1)
+		picture.BackgroundTransparency = 1
+		picture.ZIndex = 7
+		picture.Parent = row.Icon
+		showTreat(picture, index)
 	end
 end
 
@@ -2218,7 +2310,6 @@ end)()
 local OK_COLOR = Color3.fromRGB(120, 220, 140)
 local BLOCKED_COLOR = Color3.fromRGB(225, 95, 95)
 local FRONT_COLOR = Color3.fromRGB(150, 200, 255)
-local DOORWAY_COLOR = Color3.fromRGB(255, 200, 120)
 local GHOST_TRANSPARENCY = 0.45
 local ARROW_ANGLE = math.rad(35)
 local MOVE_HINT = "Tap or click anything in your bakery to move it"
@@ -2227,7 +2318,9 @@ local WALL_ROTATE_HINT = "Wall pieces always face into the room"
 local BANNER_HINT_TIME = 2
 -- A new wall piece starts with its middle at about head height.
 local WALL_START_HEIGHT = 6
-local WALL_NAMES = { "BackWall", "LeftWall", "RightWall" }
+-- BackWallRight and BackWallTop are the back wall either side of and above the door to
+-- The Sweet Stash, once it's bought.
+local WALL_NAMES = { "BackWall", "BackWallRight", "BackWallTop", "LeftWall", "RightWall" }
 -- Copies of a station keep their parts but none of their prompts, labels or effects.
 local GHOST_REMOVES =
 	{ "ProximityPrompt", "BillboardGui", "ParticleEmitter", "Sparkles", "Sound", "ClickDetector", "PointLight" }
@@ -2293,9 +2386,11 @@ local function floorTop(plot)
 	return floor.CFrame * CFrame.new(0, floor.Size.Y / 2, 0)
 end
 
--- Your bakery's floor inside the walls, which grows when you expand it.
+-- Your bakery's floor inside the walls, which grows when you expand it, or The Sweet
+-- Stash's floor while a Stash Shelf is held.
 local function myBounds()
-	return Layout.Bounds(state.Expansion)
+	local item = held and held.itemId and Config.GetItem(held.itemId)
+	return item and Layout.BoundsFor(item, state.Expansion) or Layout.Bounds(state.Expansion)
 end
 
 local function allThings(plot)
@@ -2341,8 +2436,14 @@ local function showGrid(plot)
 	local top = floorTop(plot)
 	local bounds = myBounds()
 	gridLevel = state.Expansion
+	stash.gridRoom = bounds.MaxZ < Layout.Bounds(state.Expansion).MinZ
 	grid = Instance.new("Folder")
 	grid.Name = "DecorGrid"
+	-- Customize mode has nothing to place, so no grid.
+	if stash.marking then
+		grid.Parent = Workspace
+		return
+	end
 	local columns, rows = bounds.MaxX - bounds.MinX, bounds.MaxZ - bounds.MinZ
 	local middleX = (bounds.MinX + bounds.MaxX) / 2
 	local middleZ = (bounds.MinZ + bounds.MaxZ) / 2
@@ -2368,11 +2469,23 @@ local function showGrid(plot)
 		local line = markerPart("Line", Vector3.new(columns, 0.02, 0.06), WHITE, 0.55, grid)
 		line.CFrame = top * CFrame.new(middleX, 0.05, z)
 	end
+	-- The doorway, and The Sweet Stash's door and whiteboard, are tinted orange where
+	-- they're drawn. The colour is written here, not in its own local, to keep the script
+	-- within Luau's limit of 200 local variables.
 	if not tiling.style then
-		local entrance = Layout.Entrance
-		local doorwaySize = Vector3.new(entrance.MaxX - entrance.MinX, 0.02, entrance.MaxZ - entrance.MinZ)
-		local doorway = markerPart("Doorway", doorwaySize, DOORWAY_COLOR, 0.55, grid)
-		doorway.CFrame = top * CFrame.new(Layout.Center(entrance) + Vector3.new(0, 0.06, 0))
+		local clear = { Layout.Entrance }
+		if state.Stash then
+			for _, fixed in Layout.StashThings(state.Expansion) do
+				table.insert(clear, fixed.Rect)
+			end
+		end
+		for _, rect in clear do
+			if Layout.Inside(rect, bounds) then
+				local size = Vector3.new(rect.MaxX - rect.MinX, 0.02, rect.MaxZ - rect.MinZ)
+				local doorway = markerPart("Doorway", size, Color3.fromRGB(255, 200, 120), 0.55, grid)
+				doorway.CFrame = top * CFrame.new(Layout.Center(rect) + Vector3.new(0, 0.06, 0))
+			end
+		end
 	end
 	grid.Parent = Workspace
 end
@@ -2531,7 +2644,13 @@ local function refreshHeld()
 	local top = floorTop(plot)
 	held.ghost:PivotTo(Layout.CFrame(top, held.shape, held.entry) * held.base)
 	local thing = heldThing()
-	local ok, reason = Layout.Check(thing, allThings(plot), myBounds())
+	local others = allThings(plot)
+	if state.Stash then
+		for _, fixed in Layout.StashThings(state.Expansion) do
+			table.insert(others, fixed)
+		end
+	end
+	local ok, reason = Layout.Check(thing, others, myBounds())
 	held.ok = ok
 	updateMarker(top, thing, ok)
 	local color = ok and OK_COLOR or BLOCKED_COLOR
@@ -2552,7 +2671,7 @@ local function refreshBar()
 	placeBanner.Visible = decorating
 	placeBar.Visible = decorating
 	local laying = tiling.style ~= nil
-	barButtons.Rotate.Visible = not laying
+	barButtons.Rotate.Visible = not laying and not stash.marking
 	barButtons.Fill.Visible = laying
 	barButtons.Rotate.BackgroundColor3 = (held and not held.wall) and BLUE or GREY
 	barButtons.Place.Visible = held ~= nil
@@ -2571,7 +2690,7 @@ local function refreshBar()
 	barButtons.Cancel.Visible = held ~= nil
 	barButtons.Done.Visible = held == nil
 	if decorating and not held and not laying then
-		placeBanner.Text = MOVE_HINT
+		placeBanner.Text = stash.marking and stash.HINT or MOVE_HINT
 		placeBanner.BackgroundColor3 = GREEN
 	end
 	if laying then
@@ -2581,6 +2700,7 @@ end
 
 local function hold(info)
 	held = info
+	stash.regrid()
 	setHidden(info.original, true)
 	if info.wall then
 		showWallGrid(myPlot())
@@ -2613,7 +2733,8 @@ local function holdItem(itemId, key)
 		local spot = pointInFront(plot)
 		entry = Layout.WallEntryAt(shape, Vector3.new(spot.X, WALL_START_HEIGHT, spot.Z), myBounds())
 	else
-		entry = Layout.EntryAt(shape, pointInFront(plot), 0, myBounds())
+		-- A Stash Shelf starts in The Sweet Stash, nearest the spot in front of you.
+		entry = Layout.EntryAt(shape, pointInFront(plot), 0, Layout.BoundsFor(item, state.Expansion))
 	end
 	-- A new piece shows the colour it will be: the newest one bought or put away for it.
 	if not key then
@@ -2676,6 +2797,7 @@ local function drop(waiting)
 	end
 	local current = held
 	held = nil
+	stash.regrid()
 	ghostHighlight.Adornee = nil
 	marker.Parent = nil
 	hideWallGrid()
@@ -2710,6 +2832,7 @@ local function setDecorating(on)
 		tiling.style = nil
 		tiling.fillUntil = 0
 		tiling.hover.Parent = nil
+		stash.stopMarking()
 	end
 	refreshHotbarVisible()
 	refreshBar()
@@ -2721,7 +2844,7 @@ startPlacing = function(itemId)
 	if not myPlot() then
 		return
 	end
-	if tiling.style then
+	if tiling.style or stash.marking then
 		setDecorating(false)
 	end
 	setDecorating(true)
@@ -2736,10 +2859,14 @@ end
 -- height above the floor.
 local function surfacePointAt(plot, ray)
 	local surfaces = { plot.Floor, plot:FindFirstChild("FloorExtension") }
+	local room = plot:FindFirstChild("StashRoom")
+	if room then
+		table.insert(surfaces, room.Floor)
+	end
 	if held and held.wall then
 		surfaces = {}
 		for _, name in WALL_NAMES do
-			table.insert(surfaces, plot.Walls[name])
+			table.insert(surfaces, plot.Walls:FindFirstChild(name))
 		end
 	end
 	local params = RaycastParams.new()
@@ -3008,6 +3135,110 @@ local function pointerOverGui(position)
 	return false
 end
 
+-- Customize mode for The Sweet Stash runs inside decorate mode, like laying tiles.
+-- stash.marking is true while it's on, and tapping a display case opens
+-- panels.CaseTreat for it, with its key in stash.caseKey. While it's on, cases kept for
+-- one treat show a tag with that treat, in the stash.tags folder. gridRoom is true while
+-- the grid is drawn in the stash, for a held Stash Shelf.
+stash.HINT = "Tap a display case to choose its treat"
+stash.marking = false
+stash.caseKey = nil
+stash.tags = nil
+stash.gridRoom = false
+
+function stash.startMarking()
+	setPanel(nil)
+	if not myPlot() then
+		return
+	end
+	setDecorating(false)
+	stash.marking = true
+	setDecorating(true)
+	stash.refreshTags()
+end
+
+function stash.stopMarking()
+	stash.marking = false
+	stash.caseKey = nil
+	if stash.tags then
+		stash.tags:Destroy()
+		stash.tags = nil
+	end
+end
+
+-- The key of a display case in the store, or nil for anything else, like a Stash Shelf.
+function stash.caseOf(thing)
+	local entry = thing and state.Placed[thing.Key]
+	local item = entry and Config.GetItem(entry.Id)
+	return item and item.Slots and not item.Room and thing.Key or nil
+end
+
+function stash.pick(plot, ray)
+	local key = stash.caseOf(pieceOnRay(plot, ray))
+	if key then
+		stash.caseKey = key
+		setPanel("CaseTreat")
+	end
+end
+
+-- Draws the grid again when the held piece goes between the bakery and the stash.
+function stash.regrid()
+	local plot = myPlot()
+	local room = myBounds().MaxZ < Layout.Bounds(state.Expansion).MinZ
+	if grid and plot and room ~= stash.gridRoom then
+		grid:Destroy()
+		showGrid(plot)
+	end
+end
+
+-- A tag over each display case kept for one treat, showing the treat and its name.
+function stash.refreshTags()
+	if stash.tags then
+		stash.tags:Destroy()
+		stash.tags = nil
+	end
+	local plot = myPlot()
+	if not stash.marking or not plot then
+		return
+	end
+	stash.tags = Instance.new("Folder")
+	stash.tags.Name = "TreatTags"
+	for key, entry in state.Placed do
+		local model = entry.Treat and plot.Placed:FindFirstChild("Placed_" .. key)
+		if model and model.PrimaryPart then
+			local box, size = model:GetBoundingBox()
+			local tag = Instance.new("BillboardGui")
+			tag.Adornee = model.PrimaryPart
+			tag.Size = UDim2.fromOffset(110, 100)
+			tag.StudsOffsetWorldSpace = Vector3.new(0, box.Y + size.Y / 2 - model.PrimaryPart.Position.Y + 2, 0)
+			tag.AlwaysOnTop = true
+			tag.Parent = stash.tags
+			local card = Instance.new("Frame")
+			card.Size = UDim2.fromScale(1, 1)
+			card.BackgroundColor3 = WHITE
+			card.Parent = tag
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0, 12)
+			corner.Parent = card
+			local picture = Instance.new("ViewportFrame")
+			picture.Size = UDim2.fromScale(1, 0.7)
+			picture.BackgroundTransparency = 1
+			picture.Parent = card
+			showTreat(picture, entry.Treat)
+			local name = Instance.new("TextLabel")
+			name.Position = UDim2.fromScale(0.05, 0.68)
+			name.Size = UDim2.fromScale(0.9, 0.28)
+			name.BackgroundTransparency = 1
+			name.Font = FONT
+			name.TextScaled = true
+			name.TextColor3 = BROWN
+			name.Text = Config.Recipes[entry.Treat].Name .. "s"
+			name.Parent = card
+		end
+	end
+	stash.tags.Parent = Workspace
+end
+
 -- With a mouse and nothing held, the piece under the pointer is outlined.
 RunService.RenderStepped:Connect(function()
 	local plot = myPlot()
@@ -3024,6 +3255,11 @@ RunService.RenderStepped:Connect(function()
 		return
 	end
 	local thing = pieceOnRay(plot, Workspace.CurrentCamera:ViewportPointToRay(mouse.X, mouse.Y))
+	-- In Customize mode, only display cases light up.
+	if stash.marking then
+		hoverHighlight.Adornee = stash.caseOf(thing) and pieceInstance(plot, thing.Key)
+		return
+	end
 	hoverHighlight.Adornee = thing and pieceInstance(plot, thing.Key)
 	if os.clock() >= bannerHintUntil then
 		placeBanner.Text = thing and ("Click to move the " .. thing.Name:lower()) or MOVE_HINT
@@ -3052,6 +3288,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
 			tiling.dragging = true
 			tiling.sent = {}
 			tiling.layAt(plot, Workspace.CurrentCamera:ScreenPointToRay(input.Position.X, input.Position.Y))
+		elseif stash.marking then
+			stash.pick(plot, Workspace.CurrentCamera:ScreenPointToRay(input.Position.X, input.Position.Y))
 		elseif held then
 			local point = screenPoint(plot, input.Position)
 			if point then
@@ -3102,6 +3340,8 @@ UserInputService.TouchTap:Connect(function(positions, processed)
 	local ray = Workspace.CurrentCamera:ScreenPointToRay(position.X, position.Y)
 	if tiling.style then
 		tiling.layAt(plot, ray)
+	elseif stash.marking then
+		stash.pick(plot, ray)
 	elseif held then
 		local point = surfacePointAt(plot, ray)
 		if point then
@@ -3143,6 +3383,8 @@ local function refreshDecorating()
 	end
 	refreshHeld()
 	refreshBar()
+	-- A case's treat may have changed.
+	stash.refreshTags()
 end
 
 local SLOT_KEYS = { Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four, Enum.KeyCode.Five }
