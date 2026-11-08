@@ -104,6 +104,22 @@ local function cleanPaint(saved)
 	return paint
 end
 
+-- Floor style Ids by tile key, for tiles inside the biggest bakery. The original floor
+-- isn't saved, since it's what a tile shows until something is laid on it.
+local function cleanFloor(saved)
+	local floor = {}
+	if type(saved) == "table" then
+		for key, id in saved do
+			local i, j = Layout.TileOfKey(key)
+			local style = Config.GetFloor(id)
+			if i and style and style.Id ~= "Original" and Layout.TileRect(i, j, Layout.Largest) then
+				floor[Layout.TileKey(i, j)] = style.Id
+			end
+		end
+	end
+	return floor
+end
+
 -- Keeps placed items that are owned and inside the walls, and moved stations. Wall items
 -- keep their height and must still be on a wall. Overlaps were checked when each piece
 -- was placed.
@@ -115,8 +131,8 @@ local function cleanLayout(data, savedPlaced, savedStock, savedStations)
 		local entry = item and Layout.CleanEntry(saved.X, saved.Z, saved.R, item.Wall and saved.Y or nil)
 		if entry and (placedCounts[item.Id] or 0) < data.Owned[item.Id] then
 			entry.Id = item.Id
-			-- A display case keeps the colour it was painted.
-			local paint = item.Slots and Config.GetPaint(saved.Paint)
+			-- A paintable piece keeps the colour it was painted.
+			local paint = Config.IsPaintable(item) and Config.GetPaint(saved.Paint)
 			entry.Paint = paint and paint.Id or nil
 			local fits = Layout.Inside(Layout.Rect(Layout.ItemShape(item), entry), bounds)
 			if item.Wall then
@@ -140,6 +156,39 @@ local function cleanLayout(data, savedPlaced, savedStock, savedStations)
 			end
 		end
 	end
+end
+
+-- Paint Ids by item Id for paintable pieces that are bought or put away but not placed,
+-- newest last. Placing one takes the newest colour. Each list keeps the newest colours,
+-- no more than there are such copies.
+local function cleanSparePaint(data, saved)
+	local spare = {}
+	if type(saved) ~= "table" then
+		return spare
+	end
+	local placed = {}
+	for _, entry in data.Placed do
+		placed[entry.Id] = (placed[entry.Id] or 0) + 1
+	end
+	for _, item in Config.Items do
+		local list = saved[item.Id]
+		if Config.IsPaintable(item) and type(list) == "table" then
+			local colours = {}
+			for _, id in list do
+				local paint = Config.GetPaint(id)
+				if paint then
+					table.insert(colours, paint.Id)
+				end
+			end
+			while #colours > data.Owned[item.Id] - (placed[item.Id] or 0) do
+				table.remove(colours, 1)
+			end
+			if #colours > 0 then
+				spare[item.Id] = colours
+			end
+		end
+	end
+	return spare
 end
 
 -- Saves from before free placement had items on 16 fixed squares and a case on the
@@ -281,6 +330,8 @@ local function clean(saved)
 		-- How many times the bakery has been made bigger. 0 is the starting size.
 		Expansion = math.clamp(math.floor(tonumber(saved.Expansion) or 0), 0, #Config.Expansions),
 		Paint = cleanPaint(saved.Paint),
+		-- Floor style Ids by tile key. See Layout.TileSize.
+		Floor = cleanFloor(saved.Floor),
 		-- 0 until the first save, so a 0 here means this is the player's first visit.
 		LastSeen = cleanCount(saved.LastSeen),
 		-- Who invited this player (a userId), or 0. Set on a first visit through an invite.
@@ -331,6 +382,7 @@ local function clean(saved)
 	else
 		convertLayout(data, savedStock)
 	end
+	data.SparePaint = cleanSparePaint(data, saved.SparePaint)
 
 	-- New saves start with a stocked pantry. Counts never go above the pantry's capacity.
 	data.Pantry = {}
