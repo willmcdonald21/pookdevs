@@ -100,11 +100,10 @@ local shopButton = button("ShopButton", UDim2.fromOffset(120, 44), UDim2.fromOff
 shopButton.Text = "Shop"
 local decorButton = button("DecorButton", UDim2.fromOffset(120, 44), UDim2.fromOffset(10, 126), TOP_LEFT, BLUE)
 decorButton.Text = "Decorate"
-local deliveryButton = button("DeliveryButton", UDim2.fromOffset(120, 44), UDim2.fromOffset(10, 174), TOP_LEFT, BLUE)
-deliveryButton.Text = "Deliveries"
-local cookbookButton = button("CookbookButton", UDim2.fromOffset(120, 44), UDim2.fromOffset(10, 222), TOP_LEFT, BLUE)
-cookbookButton.Text = "Cookbook"
-local boostButton = button("BoostButton", UDim2.fromOffset(120, 44), UDim2.fromOffset(10, 270), TOP_LEFT, BLUE)
+-- Deliveries and the Cookbook open at their counters in the bakery, so they have no button.
+local employeesButton = button("EmployeesButton", UDim2.fromOffset(120, 44), UDim2.fromOffset(10, 174), TOP_LEFT, BLUE)
+employeesButton.Text = "Employees"
+local boostButton = button("BoostButton", UDim2.fromOffset(120, 44), UDim2.fromOffset(10, 222), TOP_LEFT, BLUE)
 boostButton.Text = "Boosts"
 local storeButton = button("StoreButton", UDim2.fromOffset(44, 68), UDim2.fromOffset(134, 6), TOP_LEFT, GREEN)
 storeButton.Text = "+"
@@ -591,8 +590,9 @@ function panels.Shop()
 	end
 end
 
+-- A co-baker opens this at their friend's counter, and sees their own recipes and goals.
 function panels.Cookbook()
-	panelTitle.Text = "Cookbook"
+	panelTitle.Text = state.Work and "Your Cookbook" or "Cookbook"
 	addHeader("Recipes")
 	for index, recipe in Config.Recipes do
 		local price, onSale = customerPrice(recipe)
@@ -1808,14 +1808,11 @@ end)
 decorButton.Activated:Connect(function()
 	togglePanel("Decorate")
 end)
-deliveryButton.Activated:Connect(function()
-	togglePanel("Deliveries")
+employeesButton.Activated:Connect(function()
+	togglePanel("Employees")
 end)
 storeButton.Activated:Connect(function()
 	togglePanel("Store")
-end)
-cookbookButton.Activated:Connect(function()
-	togglePanel("Cookbook")
 end)
 boostButton.Activated:Connect(function()
 	togglePanel("Boosts")
@@ -1898,6 +1895,41 @@ local function myPlot()
 	end
 	return nil
 end
+
+-- A bouncing "!" over the Delivery Counter when an order can be packed, and over the
+-- Cookbook Counter when a goal can be claimed or a recipe unlocked, in the bakery you're
+-- working in. setCounterAlerts(deliveries, cookbook) turns them on and off.
+local setCounterAlerts = (function()
+	local alerts = {}
+	for _, stationName in { "PackingStation", "UpgradeStation" } do
+		local alert = Instance.new("BillboardGui")
+		alert.Name = stationName .. "Alert"
+		alert.Size = UDim2.fromOffset(52, 52)
+		alert.StudsOffset = Vector3.new(0, 4.5, 0)
+		alert.MaxDistance = 120
+		alert.Enabled = false
+		local mark = label("Mark", UDim2.fromScale(1, 1), UDim2.new(), TOP_LEFT, GOLD, WHITE, alert)
+		mark.Text = "!"
+		mark.UICorner.CornerRadius = UDim.new(0.5, 0)
+		alert.Parent = gui
+		TweenService:Create(
+			alert,
+			TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ StudsOffset = Vector3.new(0, 5.3, 0) }
+		):Play()
+		alerts[stationName] = alert
+	end
+	return function(deliveries, cookbook)
+		local coBaking = player:GetAttribute("CoBaking")
+		local plot = coBaking and plotsFolder:FindFirstChild(coBaking) or myPlot()
+		for stationName, on in { PackingStation = deliveries, UpgradeStation = cookbook } do
+			local station = plot and plot:FindFirstChild(stationName)
+			local part = station and (station:IsA("BasePart") and station or station:FindFirstChildWhichIsA("BasePart", true))
+			alerts[stationName].Adornee = part
+			alerts[stationName].Enabled = on and part ~= nil
+		end
+	end
+end)()
 
 -- Decorating
 -- Pieces snap to a grid on your floor, or on your walls for wall pieces, while the camera
@@ -2643,16 +2675,16 @@ stateEvent.OnClientEvent:Connect(function(newState)
 		end
 	end
 	friendsButton.BackgroundColor3 = (state.Work or #state.CoBakers > 0) and GREEN or PINK
-	deliveryButton.BackgroundColor3 = ready and GREEN or BLUE
-	deliveryButton.Text = ready and "Deliveries!" or "Deliveries"
 	local cookbookReady = state.CanUnlockRecipe
 	for _, goal in state.Goals do
 		if not goal.Claimed and goal.Progress >= goal.Target then
 			cookbookReady = true
 		end
 	end
-	cookbookButton.BackgroundColor3 = cookbookReady and GREEN or BLUE
-	cookbookButton.Text = cookbookReady and "Cookbook!" or "Cookbook"
+	setCounterAlerts(ready, cookbookReady)
+	local hiring = state.CanHire or state.CanTrain
+	employeesButton.BackgroundColor3 = hiring and GREEN or BLUE
+	employeesButton.Text = hiring and "Employees!" or "Employees"
 	refreshBoostButton()
 	for slot, entry in hotbarSlots do
 		local recipeIndex = state.Hotbar[slot]
@@ -2740,7 +2772,7 @@ local function showWelcome()
 	welcomeShown = true
 	queuePopup(
 		"Welcome to your bakery!",
-		"1. Bake treats at the oven\n2. Put them in a display case\n3. Customers shop and pay you\n4. Pack deliveries for big rewards and Sugar Stars\nBuy cases and decorations to grow your bakery!",
+		"1. Bake treats at the oven\n2. Put them in a display case\n3. Customers line up at the register: tap E there to check them out\n4. Pack deliveries for big rewards and Sugar Stars\nBuy cases and decorations to grow your bakery!",
 		"Let's bake!"
 	)
 end
