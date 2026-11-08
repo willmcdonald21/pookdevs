@@ -1973,18 +1973,22 @@ placeBarLayout.Padding = UDim.new(0, 8)
 placeBarLayout.SortOrder = Enum.SortOrder.LayoutOrder
 placeBarLayout.Parent = placeBar
 
+-- The buttons along the bottom while decorating, by name, such as barButtons.Rotate. They
+-- share one table to keep the script within Luau's limit of 200 local variables.
+local barButtons = {}
+
 local function barButton(name, order, color)
 	local object = button(name, UDim2.fromOffset(100, 46), UDim2.new(), TOP_LEFT, color, placeBar)
 	object.Text = name
 	object.LayoutOrder = order
-	return object
+	barButtons[name] = object
 end
 
-local rotateButton = barButton("Rotate", 1, BLUE)
-local placeButton = barButton("Place", 2, GREEN)
-local putAwayButton = barButton("Store", 3, GOLD)
-local cancelButton = barButton("Cancel", 4, PINK)
-local doneButton = barButton("Done", 5, PINK)
+barButton("Rotate", 1, BLUE)
+barButton("Place", 2, GREEN)
+barButton("Store", 3, GOLD)
+barButton("Cancel", 4, PINK)
+barButton("Done", 5, PINK)
 
 -- The hotbar shares the bottom of the screen with these buttons and sits under open menus.
 refreshHotbarVisible = function()
@@ -2229,7 +2233,7 @@ local function refreshHeld()
 	local surface = held.wall and "a wall" or "the floor"
 	placeBanner.Text = ok and ("%s %s: tap or click %s to move it"):format(action, held.name, surface) or reason
 	placeBanner.BackgroundColor3 = ok and GREEN or BLOCKED_COLOR
-	placeButton.BackgroundColor3 = ok and GREEN or GREY
+	barButtons.Place.BackgroundColor3 = ok and GREEN or GREY
 end
 
 -- Rotate always shows while decorating so players know it's there. It's grey until
@@ -2237,11 +2241,11 @@ end
 local function refreshBar()
 	placeBanner.Visible = decorating
 	placeBar.Visible = decorating
-	rotateButton.BackgroundColor3 = (held and not held.wall) and BLUE or GREY
-	placeButton.Visible = held ~= nil
-	putAwayButton.Visible = held ~= nil and held.key ~= nil and held.stationId == nil
-	cancelButton.Visible = held ~= nil
-	doneButton.Visible = held == nil
+	barButtons.Rotate.BackgroundColor3 = (held and not held.wall) and BLUE or GREY
+	barButtons.Place.Visible = held ~= nil
+	barButtons.Store.Visible = held ~= nil and held.key ~= nil and held.stationId == nil
+	barButtons.Cancel.Visible = held ~= nil
+	barButtons.Done.Visible = held == nil
 	if decorating and not held then
 		placeBanner.Text = MOVE_HINT
 		placeBanner.BackgroundColor3 = GREEN
@@ -2498,18 +2502,18 @@ local function tryPlace()
 	drop(true)
 end
 
-rotateButton.Activated:Connect(rotateHeld)
-placeButton.Activated:Connect(tryPlace)
-cancelButton.Activated:Connect(function()
+barButtons.Rotate.Activated:Connect(rotateHeld)
+barButtons.Place.Activated:Connect(tryPlace)
+barButtons.Cancel.Activated:Connect(function()
 	drop(false)
 end)
-putAwayButton.Activated:Connect(function()
+barButtons.Store.Activated:Connect(function()
 	if held and held.key then
 		placeEvent:FireServer("Store", held.key)
 		drop(true)
 	end
 end)
-doneButton.Activated:Connect(function()
+barButtons.Done.Activated:Connect(function()
 	setDecorating(false)
 end)
 
