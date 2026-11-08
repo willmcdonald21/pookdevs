@@ -37,8 +37,44 @@ function Layout.Bounds(level)
 end
 
 Layout.Start = Layout.Bounds(0)
--- Saved and sent cells must fit in the biggest bakery.
 Layout.Largest = Layout.Bounds(#Config.Expansions)
+
+-- The Sweet Stash, a room behind the back wall that moves back with it. MinX and MaxX are
+-- its inside walls, and it's Depth studs deep behind the back wall, which is 1 stud thick.
+-- The door is a gap in the back wall from DoorMinX to DoorMaxX, DoorHeight tall. The
+-- whiteboard hangs on the room's right wall, WhiteboardZ studs behind the back wall.
+Layout.Stash = {
+	MinX = -3,
+	MaxX = 21,
+	Depth = 14,
+	Wall = 1,
+	DoorMinX = 6,
+	DoorMaxX = 11,
+	DoorHeight = 9,
+	WhiteboardZ = 6,
+	WhiteboardWidth = 6,
+}
+
+-- The floor inside The Sweet Stash at an expansion level.
+function Layout.StashBounds(level)
+	local stash = Layout.Stash
+	local maxZ = Layout.Bounds(level).MinZ - stash.Wall
+	return { MinX = stash.MinX, MaxX = stash.MaxX, MinZ = maxZ - stash.Depth, MaxZ = maxZ }
+end
+
+-- Where an item can go: The Sweet Stash for an item with Room, or else the bakery.
+function Layout.BoundsFor(item, level)
+	return item.Room and Layout.StashBounds(level) or Layout.Bounds(level)
+end
+
+-- Saved and sent cells must fit in the biggest bakery or its stash.
+local farthestStash = Layout.StashBounds(#Config.Expansions)
+Layout.Farthest = {
+	MinX = math.min(Layout.Largest.MinX, farthestStash.MinX),
+	MaxX = math.max(Layout.Largest.MaxX, farthestStash.MaxX),
+	MinZ = farthestStash.MinZ,
+	MaxZ = Layout.Largest.MaxZ,
+}
 
 -- Just inside the door. Solid pieces can't go here, so customers can always get in.
 Layout.Entrance = { MinX = -7, MaxX = 7, MinZ = 15, MaxZ = 19 }
@@ -222,7 +258,7 @@ function Layout.WallEntryAt(shape, point, bounds)
 end
 
 -- Turns saved or sent values into an entry, or nil when they aren't whole numbers inside
--- the biggest bakery. y is only given for wall pieces.
+-- the biggest bakery or its stash. y is only given for wall pieces.
 function Layout.CleanEntry(x, z, r, y)
 	if type(x) ~= "number" or type(z) ~= "number" or type(r) ~= "number" then
 		return nil
@@ -230,7 +266,7 @@ function Layout.CleanEntry(x, z, r, y)
 	if x % 1 ~= 0 or z % 1 ~= 0 or r % 1 ~= 0 then
 		return nil
 	end
-	local largest = Layout.Largest
+	local largest = Layout.Farthest
 	local inX = x >= largest.MinX - Layout.MinX and x < largest.MaxX - Layout.MinX
 	local inZ = z >= largest.MinZ - Layout.MinZ and z < largest.MaxZ - Layout.MinZ
 	if not inX or not inZ or r < 0 or r > 3 then
@@ -261,7 +297,9 @@ end
 -- A piece as the placement rules see it. entry.Id is the item's Id.
 function Layout.ItemThing(key, entry)
 	local item = Config.GetItem(entry.Id)
-	return describe(key, item.Name, Layout.ItemShape(item), entry, item.Flat == true, item.Slots ~= nil, item.Wall == true)
+	local thing = describe(key, item.Name, Layout.ItemShape(item), entry, item.Flat == true, item.Slots ~= nil, item.Wall == true)
+	thing.Room = item.Room
+	return thing
 end
 
 function Layout.StationThing(station, shape, entry)
@@ -281,6 +319,39 @@ function Layout.AllThings(placed, stations, stationShapes)
 		end
 	end
 	return things
+end
+
+-- The parts of The Sweet Stash that nothing can be put on, as things for Check: the
+-- doorway on both sides of the back wall, all the way up so no wall piece hangs over the
+-- door, and the whiteboard with room to stand in front of it.
+function Layout.StashThings(level)
+	local stash, bounds, room = Layout.Stash, Layout.Bounds(level), Layout.StashBounds(level)
+	local function fixed(key, name, rect, reason)
+		return { Key = key, Name = name, Rect = rect, Bottom = 0, Height = Layout.WallHeight, Reason = reason }
+	end
+	local doorway = { MinX = stash.DoorMinX - 1, MaxX = stash.DoorMaxX + 1 }
+	local reason = ("Keep the door to %s clear"):format(Config.Stash.Name)
+	local whiteboardMaxZ = room.MaxZ - stash.WhiteboardZ + stash.WhiteboardWidth / 2
+	return {
+		fixed("StashDoor", "Stash door", {
+			MinX = doorway.MinX,
+			MaxX = doorway.MaxX,
+			MinZ = bounds.MinZ,
+			MaxZ = bounds.MinZ + Layout.FrontDepth,
+		}, reason),
+		fixed("StashDoorInside", "Stash door", {
+			MinX = doorway.MinX,
+			MaxX = doorway.MaxX,
+			MinZ = room.MaxZ - Layout.FrontDepth,
+			MaxZ = room.MaxZ,
+		}, reason),
+		fixed("Whiteboard", "Whiteboard", {
+			MinX = room.MaxX - 1 - Layout.FrontDepth,
+			MaxX = room.MaxX,
+			MinZ = whiteboardMaxZ - stash.WhiteboardWidth,
+			MaxZ = whiteboardMaxZ,
+		}, "Keep the whiteboard clear"),
+	}
 end
 
 local function overlaps(a, b)
@@ -326,9 +397,13 @@ end
 -- Rugs only clash with other rugs, so they can go under furniture and in the doorway.
 -- Solid pieces clash where their cells and their heights overlap, so a wall piece can
 -- hang above furniture. Wall pieces are up out of the way of the doorway and customers.
+-- A thing with a Reason, like the stash door, gives that reason when something is on it.
 function Layout.Check(thing, others, bounds)
 	bounds = bounds or Layout.Start
 	if not Layout.Inside(thing.Rect, bounds) then
+		if thing.Room then
+			return false, ("Put the %s in %s"):format(thing.Name:lower(), Config.Stash.Name)
+		end
 		return false, "Keep it inside your bakery"
 	end
 	if thing.Wall and not Layout.OnWall(thing, bounds) then
@@ -348,7 +423,7 @@ function Layout.Check(thing, others, bounds)
 				end
 			elseif not other.Flat then
 				if overlaps(thing.Rect, other.Rect) and overlapsHeight(thing, other) then
-					return false, inTheWay(thing, other)
+					return false, other.Reason or inTheWay(thing, other)
 				end
 				if not thing.Wall and not other.Wall then
 					if other.Front and overlaps(thing.Rect, other.Front) then
