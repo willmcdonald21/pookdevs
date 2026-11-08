@@ -973,9 +973,6 @@ Config.OvenPaintCoins = 75
 Config.PiecePaintCoins = 15
 -- Paintable pieces start in this colour, unless they give their own OriginalPaint.
 Config.PieceOriginalPaint = "Bubblegum"
--- The old names, until the scripts use the new ones.
-Config.CasePaintCoins = Config.PiecePaintCoins
-Config.CaseOriginalPaint = Config.PieceOriginalPaint
 Config.Paints = {
 	{ Id = "Vanilla", Name = "Vanilla", Color = rgb(255, 240, 225) },
 	{ Id = "Snow", Name = "Snow", Color = rgb(250, 250, 252) },
