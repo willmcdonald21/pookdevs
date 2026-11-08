@@ -39,6 +39,9 @@ local UPRIGHT = CFrame.Angles(0, 0, math.rad(90)) -- cylinders run along X, so s
 -- (+Z faces the plaza). Bakeries use their largest expansion, walls included.
 local largest = Layout.Largest
 local BAKERY_BOX = { MinX = largest.MinX - 4, MaxX = largest.MaxX + 4, MinZ = largest.MinZ - 4, MaxZ = largest.MaxZ + 4 }
+-- The Sweet Stash behind the back wall of the largest bakery, walls included.
+local stash = Layout.StashBounds(#require(game.ReplicatedStorage.Config).Expansions)
+local STASH_BOX = { MinX = stash.MinX - 5, MaxX = stash.MaxX + 5, MinZ = stash.MinZ - 5, MaxZ = largest.MinZ }
 local BAKERY_FRONT_HALF = 14 -- the path, the crate at x 9 and the flyer stand at x -9
 local GROCERY_BOX = { MinX = -23, MaxX = 23, MinZ = -18, MaxZ = 22 }
 local GROCERY_FRONT_HALF = 12
@@ -133,7 +136,7 @@ for _, plot in workspace.Plots:GetChildren() do
 	local floor = plot:FindFirstChild("Floor")
 	if floor then
 		local reach = flat(floor.Position - center).Magnitude
-		table.insert(buildings, { cframe = floor.CFrame, box = BAKERY_BOX, front = BAKERY_FRONT_HALF, reach = reach })
+		table.insert(buildings, { cframe = floor.CFrame, box = BAKERY_BOX, stash = STASH_BOX, front = BAKERY_FRONT_HALF, reach = reach })
 		local offset = floor.Position - center
 		table.insert(angles, math.atan2(offset.Z, offset.X))
 	end
@@ -193,6 +196,9 @@ local function isClear(position, radius, lawn)
 	end
 	for _, building in buildings do
 		if not outsideBox(building.cframe, building.box, position, radius) then
+			return false
+		end
+		if building.stash and not outsideBox(building.cframe, building.stash, position, radius) then
 			return false
 		end
 		local front = { MinX = -building.front, MaxX = building.front, MinZ = 0, MaxZ = building.reach - PLAZA_RADIUS + 2 }
