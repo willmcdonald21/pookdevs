@@ -899,7 +899,9 @@ function Config.GetPass(id)
 end
 
 -- Selling a piece gives back this share of its price, in the coins or Stars it costs.
+-- The Sell button needs a second tap within SellConfirmSeconds, so a stray tap never sells.
 Config.SellShare = 0.5
+Config.SellConfirmSeconds = 3
 
 -- What one more copy of an item sells for, given how many are owned: the amount and
 -- "Coins" or "Stars", or nil and why it can't be sold. Gifts and anything that comes
