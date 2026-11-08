@@ -61,7 +61,7 @@ local carriedTrays = {}
 local hotbars = {}
 -- Players who've switched to running. It lasts the visit, through respawns.
 local running = {}
-local refreshHelpers
+local refreshEmployees
 -- Bake Together. coBakers maps each co-baker to the bakery they're working in, and
 -- lastAction to when they last did something there. friendPairs[a][b] is true when a and
 -- b are Roblox friends in this server.
@@ -757,6 +757,20 @@ local function syncStats(player, skipCoBakers)
 			BakeSaleAt = host.BakeSaleAt,
 		}
 	end
+	-- Employees go to the client with their names as everyone sees them, once filtered.
+	local staff = {}
+	local canTrain = false
+	for slot, employee in data.Employees do
+		local name = plot and plot.employeeNames[slot]
+		table.insert(staff, {
+			Name = name and name.Raw == employee.Name and name.Shown or "",
+			Job = employee.Job,
+			Trained = employee.Trained,
+			Look = employee.Look,
+		})
+		canTrain = canTrain or (not employee.Trained and data.Coins >= Config.Employees.TrainCost)
+	end
+	local hireCost = Config.Employees.HireCost[#data.Employees + 1]
 	stateEvent:FireClient(player, {
 		Coins = data.Coins,
 		Stars = data.Stars,
@@ -791,6 +805,9 @@ local function syncStats(player, skipCoBakers)
 		Work = work,
 		CoBakers = myCoBakers,
 		FriendBoost = friendBoost(player),
+		Employees = staff,
+		CanHire = hireCost ~= nil and data.Coins >= hireCost,
+		CanTrain = canTrain,
 	})
 	updateCarriedTray(player, data)
 	updateGuide(player)
@@ -1191,7 +1208,7 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 			notify(player, "Keep at least one display case so customers can shop")
 		else
 			storePlaced(plot, data, id)
-			refreshHelpers(plot, data)
+			refreshEmployees(plot, data)
 		end
 		syncStats(player)
 		return
@@ -1243,7 +1260,7 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 		data.Placed[key] = entry
 		buildPlaced(plot, data, key)
 	end
-	refreshHelpers(plot, data)
+	refreshEmployees(plot, data)
 	syncStats(player)
 end)
 
@@ -1315,7 +1332,7 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, paintId)
 		local nextLevel = upgrade.Levels[data[key] + 1]
 		if nextLevel and buy(player, data, nextLevel.Cost) then
 			data[key] += 1
-			refreshHelpers(plot, data)
+			refreshEmployees(plot, data)
 			syncStats(player)
 			notify(player, upgrade.Name .. " upgraded!", "Coin")
 		end
@@ -1396,7 +1413,7 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, paintId)
 				case.Paint = paint.Id
 				unbuildPlaced(plot, id)
 				buildPlaced(plot, data, id)
-				refreshHelpers(plot, data)
+				refreshEmployees(plot, data)
 			end
 			syncStats(player)
 			notify(player, ("%s painted %s!"):format(name, paint.Name), "Coin")
@@ -1810,9 +1827,10 @@ end)
 -- Customers
 -- A person is a clone of one of the looks, with a speech bubble over their head. Their root
 -- part is anchored and moved by tweening, and the client plays their walk and idle
--- animations.
-local function buildPerson(name, look)
-	local model = look:Clone()
+-- animations. Passing keep uses the look itself instead of a clone, which an employee
+-- needs so a change of clothes replaces what they wore.
+local function buildPerson(name, look, keep)
+	local model = keep and look or look:Clone()
 	model.Name = name
 	local root = model.PrimaryPart
 
@@ -2800,11 +2818,12 @@ takeFlyersEvent.OnServerEvent:Connect(function(player)
 	notify(player, ("You have %d flyers. Walk near people on the plaza to hand them out!"):format(plot.flyers), "Coin")
 end)
 
--- Helpers. They walk to do their jobs: the Baker from the pantry shelf to an empty oven,
--- and the Stocker from a finished oven to the display cases. Between jobs they wait at the
--- regular oven, the Baker at one front corner and the Stocker at the other.
-local HELPERS = { "Baker", "Stocker" }
-local HELPER_SIDES = { Baker = 1, Stocker = -1 }
+-- Employees. An owner hires up to Config.Employees.Max, and each does a different job: the
+-- Baker carries ingredients from the pantry shelf to an empty oven, the Stocker carries
+-- finished batches to the display cases, and the Cashier checks customers out at the
+-- register. Between jobs, employee 1 waits at one front corner of the regular oven and
+-- employee 2 at the other. Each is a Roblox avatar dressed the way the owner chose, in the
+-- bakery's pink apron, with a name tag.
 
 -- A spot in front of a piece, facing it. side -1 and 1 are its front corners, and 0 is
 -- the middle of its front.
@@ -2825,27 +2844,290 @@ local function treatWord(recipe, count)
 	return recipe.Name:lower() .. (count == 1 and "" or "s")
 end
 
--- Where a helper stands to use an oven, which is also where they wait at the regular oven.
-local function ovenSpot(plot, data, id, ovenId)
-	return spotBy(plot, stationThing(plot, data, ovenId or "Oven"), HELPER_SIDES[id])
+-- Where an employee stands to use an oven, which is also where they wait at the regular oven.
+local function ovenSpot(plot, data, slot, ovenId)
+	return spotBy(plot, stationThing(plot, data, ovenId or "Oven"), slot == 1 and 1 or -1)
 end
 
--- Hired helpers appear at the oven. After that they walk wherever their work takes them.
-refreshHelpers = function(plot, data)
-	for _, id in HELPERS do
-		if upgradeLevel(data, id).WalkSpeed and not plot.helpersFolder:FindFirstChild(id) then
-			local model, label = buildPerson(id, LOOKS.Helpers[id])
-			say(label, id)
-			model:PivotTo(ovenSpot(plot, data, id))
-			-- The client swings helpers' arms and legs while they walk, like customers'.
-			CollectionService:AddTag(model, "Helper")
-			model.Parent = plot.helpersFolder
+-- Builds, dresses and names employees, and handles the Employees menu. It's a function so
+-- its locals don't count toward the script's limit of 200.
+local function setUpEmployees()
+	local TextService = game:GetService("TextService")
+	local APRON = Color3.fromRGB(240, 150, 175)
+	local BODY_COLORS = { "HeadColor", "TorsoColor", "LeftArmColor", "RightArmColor", "LeftLegColor", "RightLegColor" }
+	local actionEvent = remote("EmployeeAction")
+	local nextAction = {}
+
+	-- A short text for a look, so a model can tell whether it's wearing the saved one.
+	local function lookKey(look)
+		local parts = {}
+		for _, category in Config.Wardrobe do
+			table.insert(parts, tostring(look[category.Id]))
+		end
+		return table.concat(parts, "|")
+	end
+
+	local function describe(look)
+		local description = Instance.new("HumanoidDescription")
+		local skin = Config.WardrobeItem("Skin", look.Skin).Color
+		for _, field in BODY_COLORS do
+			description[field] = skin
+		end
+		description.Shirt = look.Shirt
+		description.Pants = look.Pants
+		local accessories = { { AssetId = look.Hair, AccessoryType = Enum.AccessoryType.Hair } }
+		if look.Hat ~= 0 then
+			table.insert(accessories, { AssetId = look.Hat, AccessoryType = Enum.AccessoryType.Hat })
+		end
+		description:SetAccessories(accessories, true)
+		return description
+	end
+
+	-- Like the townsfolk looks: nothing collides, and the root is anchored and moved by
+	-- tweening. Run again after a change of clothes, which can add parts.
+	local function prepare(model)
+		for _, part in model:GetDescendants() do
+			if part:IsA("BasePart") then
+				part.CanCollide = false
+				part.CanTouch = false
+				part.CanQuery = false
+				part.Massless = true
+			end
+		end
+		local root = model.HumanoidRootPart
+		root.Anchored = true
+		root.Massless = false
+		model.PrimaryPart = root
+	end
+
+	local function apronPart(model, bodyPartName, name, size, offset)
+		local bodyPart = model[bodyPartName]
+		local part = Instance.new("Part")
+		part.Name = name
+		part.Size = size
+		part.Color = APRON
+		part.Material = Enum.Material.SmoothPlastic
+		part.CFrame = bodyPart.CFrame * offset
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = bodyPart
+		weld.Part1 = part
+		weld.Parent = part
+		part.Parent = model
+	end
+
+	-- A new avatar in a look, wearing the apron. If Roblox can't build it, a townsperson's
+	-- look stands in.
+	local function build(look)
+		local ok, model = pcall(function()
+			return Players:CreateHumanoidModelFromDescription(describe(look), Enum.HumanoidRigType.R15)
+		end)
+		if not ok then
+			warn("BakerySystem: could not build an employee: " .. tostring(model))
+			return LOOKS.People:GetChildren()[1]:Clone()
+		end
+		local animate = model:FindFirstChild("Animate")
+		if animate then
+			animate:Destroy()
+		end
+		local humanoid = model:FindFirstChildOfClass("Humanoid")
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+		humanoid.BreakJointsOnDeath = false
+		humanoid.RequiresNeck = false
+		humanoid.EvaluateStateMachine = false
+		apronPart(model, "UpperTorso", "ApronBib", Vector3.new(1.3, 1, 0.08), CFrame.new(0, -0.2, -0.62))
+		apronPart(model, "LowerTorso", "ApronSkirt", Vector3.new(1.7, 1.3, 0.08), CFrame.new(0, -0.35, -0.6))
+		prepare(model)
+		return model
+	end
+
+	-- The name tag reads "Maple · Cashier". Until a name has been filtered, it says Employee.
+	local function showName(plot, data, slot)
+		local employee = data.Employees[slot]
+		local model = plot.helpersFolder:FindFirstChild("Employee" .. slot)
+		local tag = model and model.PrimaryPart.Bubble:FindFirstChild("NameTag")
+		if employee and tag then
+			local name = plot.employeeNames[slot]
+			local shown = name and name.Raw == employee.Name and name.Shown or "Employee"
+			tag.Text = ("%s · %s"):format(shown, employee.Job)
 		end
 	end
-end
 
--- Walks a helper somewhere and turns them to face the way the spot faces. Returns false
--- when the owner has left on the way, so the helper's job ends.
+	-- Names are what the owner typed, so everyone sees them filtered by Roblox.
+	local function filterName(plot, slot, raw)
+		local entry = { Raw = raw, Shown = nil }
+		plot.employeeNames[slot] = entry
+		local ownerId = plot.ownerId
+		local ok, shown = pcall(function()
+			return TextService:FilterStringAsync(raw, ownerId, Enum.TextFilterContext.PublicChat):GetNonChatStringForBroadcastAsync()
+		end)
+		if not ok then
+			warn("BakerySystem: could not filter an employee's name: " .. tostring(shown))
+		end
+		if plot.employeeNames[slot] ~= entry or not plot.owner then
+			return
+		end
+		entry.Shown = ok and shown or nil
+		local data = PlayerData.Get(plot.owner)
+		if data then
+			showName(plot, data, slot)
+			syncStats(plot.owner)
+		end
+	end
+
+	-- Puts an employee in their saved look. If the look changes again while they change,
+	-- they change once more afterwards. The client's preview reloads when LookKey changes.
+	local function dress(plot, slot)
+		if plot.dressing[slot] then
+			return
+		end
+		plot.dressing[slot] = true
+		while true do
+			local data = plot.owner and PlayerData.Get(plot.owner)
+			local employee = data and data.Employees[slot]
+			local model = plot.helpersFolder:FindFirstChild("Employee" .. slot)
+			local key = employee and lookKey(employee.Look)
+			if not model or not key or model:GetAttribute("LookKey") == key then
+				break
+			end
+			local humanoid = model:FindFirstChildOfClass("Humanoid")
+			local ok, err = pcall(function()
+				humanoid:ApplyDescription(describe(employee.Look))
+			end)
+			if not ok then
+				warn("BakerySystem: could not dress an employee: " .. tostring(err))
+			end
+			if model.Parent then
+				prepare(model)
+			end
+			model:SetAttribute("LookKey", key)
+		end
+		plot.dressing[slot] = nil
+	end
+
+	-- Hired employees appear at the oven. After that they walk wherever their work takes
+	-- them. Their name tag, job and look follow the save.
+	refreshEmployees = function(plot, data)
+		for slot, employee in data.Employees do
+			local name = "Employee" .. slot
+			local model = plot.helpersFolder:FindFirstChild(name)
+			if not model and not plot.building[slot] then
+				plot.building[slot] = true
+				local session = plot.session
+				local key = lookKey(employee.Look)
+				task.spawn(function()
+					local look = build(employee.Look)
+					if plot.session ~= session then
+						look:Destroy()
+						return
+					end
+					plot.building[slot] = nil
+					local built, label = buildPerson(name, look, true)
+					-- The bubble sits above the name tag, and both stay just above the head
+					-- however far away the camera is.
+					local bubble = label.Parent
+					bubble.Size = UDim2.fromOffset(170, 64)
+					bubble.StudsOffset = Vector3.new(0, 2.8, 0)
+					bubble.SizeOffset = Vector2.new(0, 0.5)
+					label.Size = UDim2.new(1, 0, 0, 38)
+					local tag = Instance.new("TextLabel")
+					tag.Name = "NameTag"
+					tag.Size = UDim2.new(1, 0, 0, 22)
+					tag.Position = UDim2.fromOffset(0, 42)
+					tag.BackgroundColor3 = APRON
+					tag.Font = Enum.Font.FredokaOne
+					tag.TextScaled = true
+					tag.TextColor3 = Color3.new(1, 1, 1)
+					local corner = Instance.new("UICorner")
+					corner.CornerRadius = UDim.new(0.4, 0)
+					corner.Parent = tag
+					tag.Parent = bubble
+					built:SetAttribute("Slot", slot)
+					built:SetAttribute("LookKey", key)
+					built:PivotTo(ovenSpot(plot, data, slot))
+					-- The client plays their walk and idle animations, like the townsfolk's.
+					CollectionService:AddTag(built, "Helper")
+					built.Parent = plot.helpersFolder
+					local current = plot.owner and PlayerData.Get(plot.owner)
+					if current then
+						refreshEmployees(plot, current)
+					end
+				end)
+			elseif model then
+				model:SetAttribute("Job", employee.Job)
+				if model:GetAttribute("LookKey") ~= lookKey(employee.Look) then
+					task.spawn(dress, plot, slot)
+				end
+			end
+			local filtered = plot.employeeNames[slot]
+			if not filtered or filtered.Raw ~= employee.Name then
+				task.spawn(filterName, plot, slot, employee.Name)
+			end
+			showName(plot, data, slot)
+		end
+	end
+
+	-- The Employees menu: Hire, Train, SetJob (swapping with whoever had that job),
+	-- SetLook (a wardrobe category and item) and Rename. Only for the player's own bakery.
+	actionEvent.OnServerEvent:Connect(function(player, kind, slot, value, extra)
+		local data = PlayerData.Get(player)
+		local plot = playerPlots[player]
+		if not data or not plot or os.clock() < (nextAction[player] or 0) then
+			return
+		end
+		nextAction[player] = os.clock() + 0.1
+		local employee = type(slot) == "number" and data.Employees[slot] or nil
+		if kind == "Hire" then
+			local cost = Config.Employees.HireCost[#data.Employees + 1]
+			if not cost or not buy(player, data, cost) then
+				return
+			end
+			local hire = PlayerData.NewEmployee(data.Employees)
+			table.insert(data.Employees, hire)
+			notify(player, ("Welcome, %s! They'll work as your %s. Tap them in Employees to change that"):format(hire.Name, hire.Job:lower()), "Coin")
+		elseif not employee then
+			return
+		elseif kind == "Train" then
+			if employee.Trained or not buy(player, data, Config.Employees.TrainCost) then
+				return
+			end
+			employee.Trained = true
+			notify(player, "Training done! They walk faster, and check customers out faster", "Coin")
+		elseif kind == "SetJob" then
+			if type(value) ~= "string" or not table.find(Config.Employees.Jobs, value) or employee.Job == value then
+				return
+			end
+			for _, other in data.Employees do
+				if other ~= employee and other.Job == value then
+					other.Job = employee.Job
+				end
+			end
+			employee.Job = value
+		elseif kind == "SetLook" then
+			if type(value) ~= "string" or not Config.WardrobeItem(value, extra) then
+				return
+			end
+			employee.Look[value] = extra
+		elseif kind == "Rename" then
+			local name = PlayerData.CleanName(value)
+			if not name or name == employee.Name then
+				return
+			end
+			employee.Name = name
+		else
+			return
+		end
+		refreshEmployees(plot, data)
+		syncStats(player)
+	end)
+	Players.PlayerRemoving:Connect(function(player)
+		nextAction[player] = nil
+	end)
+end
+setUpEmployees()
+
+-- Walks an employee somewhere and turns them to face the way the spot faces. Returns false
+-- when the owner has left on the way, so the employee's job ends.
 local function helperWalk(plot, session, model, spot, speed)
 	walkAround(model, spot.Position, speed)
 	if plot.session ~= session or not model.Parent then
@@ -2855,10 +3137,10 @@ local function helperWalk(plot, session, model, spot, speed)
 	return true
 end
 
--- Sends a helper back to wait at the regular oven when they've wandered off, for example
--- after a job or after the oven moved.
-local function helperGoHome(plot, session, model, data, id, speed)
-	local home = ovenSpot(plot, data, id)
+-- Sends an employee back to wait at the regular oven when they've wandered off, for
+-- example after a job or after the oven moved.
+local function helperGoHome(plot, session, model, data, slot, speed)
+	local home = ovenSpot(plot, data, slot)
 	if (model.PrimaryPart.Position - home.Position).Magnitude > 1 then
 		helperWalk(plot, session, model, home, speed)
 	end
@@ -2916,47 +3198,6 @@ local function randomBakeable(data)
 	return bakeable[math.random(math.max(#bakeable, 1))]
 end
 
--- The Baker fetches ingredients from the pantry shelf, carries them to an empty oven, and
--- bakes a random treat you have ingredients for once they're standing at it.
-local function runBaker(plot, session, player)
-	while plot.session == session do
-		task.wait(0.5)
-		local data = PlayerData.Get(player)
-		if plot.session ~= session or not data then
-			return
-		end
-		local speed = upgradeLevel(data, "Baker").WalkSpeed
-		local model = plot.helpersFolder:FindFirstChild("Baker")
-		if speed and model then
-			local label = model.PrimaryPart.Bubble.Label
-			local recipe = randomBakeable(data)
-			local oven = recipe and firstOven(plot, data, "idle")
-			if oven then
-				say(label, "Getting ingredients")
-				if not helperWalk(plot, session, model, spotBy(plot, stationThing(plot, data, "Pantry"), 0), speed) then
-					return
-				end
-				task.wait(0.5)
-				say(label, "Baking " .. treatWord(recipe, 2))
-				if not helperWalk(plot, session, model, ovenSpot(plot, data, "Baker", oven.model.Name), speed) then
-					return
-				end
-				-- You may have used the oven or the ingredients while the Baker was walking.
-				-- If that treat can't be baked now, they bake another one they can.
-				if missingIngredients(data, recipe) then
-					recipe = randomBakeable(data)
-				end
-				if oven.state == "idle" and hasStation(data, oven.model.Name) and recipe then
-					startBake(plot, oven, player, recipe)
-				end
-				say(label, "Baker")
-			else
-				helperGoHome(plot, session, model, data, "Baker", speed)
-			end
-		end
-	end
-end
-
 local function caseRoom(plot, data)
 	local room = 0
 	for key, case in plot.cases do
@@ -2977,71 +3218,150 @@ local function caseWithRoom(plot, data, from)
 	return best
 end
 
+-- One loop for each employee slot. Each pass does one whole task of the employee's job, so
+-- a new job starts once the current task is done. Returns when the owner leaves.
+--
+-- The Baker fetches ingredients from the pantry shelf, carries them to an empty oven, and
+-- bakes a random treat you have ingredients for once they're standing at it.
+--
 -- The Stocker takes as much of a finished batch as the cases have room for, walks it to
 -- the cases one at a time, and puts each treat in when they get there. Treats they're
--- still carrying when the cases fill up wait on their tray until there's room again.
--- What they carry is lost if the owner leaves, like a batch left in an oven.
-local function runStocker(plot, session, player)
+-- still carrying when the cases fill up wait on their tray until there's room again, even
+-- if their job changes. What they carry is lost if the owner leaves, like a batch left in
+-- an oven.
+--
+-- The Cashier stands behind the register and checks out whoever is first in line.
+local function runEmployee(plot, session, player, slot)
 	local carrying = nil
 	while plot.session == session do
-		task.wait(0.5)
+		task.wait(0.25)
 		local data = PlayerData.Get(player)
 		if plot.session ~= session or not data then
 			return
 		end
-		local speed = upgradeLevel(data, "Stocker").WalkSpeed
-		local model = plot.helpersFolder:FindFirstChild("Stocker")
-		if speed and model then
+		local employee = data.Employees[slot]
+		local model = plot.helpersFolder:FindFirstChild("Employee" .. slot)
+		local job = employee and (carrying and "Stocker" or employee.Job)
+		if plot.cashierSlot == slot and job ~= "Cashier" then
+			plot.cashierSlot, plot.cashierReady = nil, false
+			checkout.update(plot)
+		end
+		if employee and model and model.PrimaryPart then
+			local speed = employee.Trained and Config.Employees.TrainedWalkSpeed or Config.Employees.WalkSpeed
 			local label = model.PrimaryPart.Bubble.Label
-			local oven = not carrying and caseRoom(plot, data) > 0 and firstOven(plot, data, "ready")
-			if oven then
-				say(label, "Fetching treats")
-				if not helperWalk(plot, session, model, ovenSpot(plot, data, "Stocker", oven.model.Name), speed) then
-					return
+			if job == "Baker" then
+				local recipe = randomBakeable(data)
+				local oven = recipe and firstOven(plot, data, "idle")
+				if oven then
+					say(label, "Getting ingredients")
+					if not helperWalk(plot, session, model, spotBy(plot, stationThing(plot, data, "Pantry"), 0), speed) then
+						return
+					end
+					task.wait(0.5)
+					say(label, "Baking " .. treatWord(recipe, 2))
+					if not helperWalk(plot, session, model, ovenSpot(plot, data, slot, oven.model.Name), speed) then
+						return
+					end
+					-- You may have used the oven or the ingredients while the Baker was walking.
+					-- If that treat can't be baked now, they bake another one they can.
+					if missingIngredients(data, recipe) then
+						recipe = randomBakeable(data)
+					end
+					if oven.state == "idle" and hasStation(data, oven.model.Name) and recipe then
+						startBake(plot, oven, player, recipe)
+					end
+					label.Visible = false
+				else
+					helperGoHome(plot, session, model, data, slot, speed)
 				end
-				-- You may have collected the batch while the Stocker was walking.
-				local take = oven.state == "ready" and math.min(oven.count, caseRoom(plot, data)) or 0
-				if take > 0 then
-					carrying = { Recipe = table.find(Config.Recipes, oven.recipe), Count = take }
-					oven.count -= take
-					if oven.count == 0 then
-						resetOven(oven)
+			elseif job == "Stocker" then
+				local oven = not carrying and caseRoom(plot, data) > 0 and firstOven(plot, data, "ready")
+				if oven then
+					say(label, "Fetching treats")
+					if not helperWalk(plot, session, model, ovenSpot(plot, data, slot, oven.model.Name), speed) then
+						return
+					end
+					-- You may have collected the batch while the Stocker was walking.
+					local take = oven.state == "ready" and math.min(oven.count, caseRoom(plot, data)) or 0
+					if take > 0 then
+						carrying = { Recipe = table.find(Config.Recipes, oven.recipe), Count = take }
+						oven.count -= take
+						if oven.count == 0 then
+							resetOven(oven)
+						else
+							oven.prompt.ActionText = ("Collect %d %s"):format(oven.count, oven.recipe.Name)
+						end
+						setHelperTray(model, carrying.Recipe)
+						syncStats(player)
+					end
+				end
+				local key = carrying and caseWithRoom(plot, data, model.PrimaryPart.Position)
+				if key then
+					local recipe = Config.Recipes[carrying.Recipe]
+					if employee.Job == "Stocker" then
+						say(label, ("Carrying %d %s"):format(carrying.Count, treatWord(recipe, carrying.Count)))
 					else
-						oven.prompt.ActionText = ("Collect %d %s"):format(oven.count, oven.recipe.Name)
+						say(label, "Finishing up")
 					end
-					setHelperTray(model, carrying.Recipe)
-					syncStats(player)
-				end
-			end
-			local key = carrying and caseWithRoom(plot, data, model.PrimaryPart.Position)
-			if key then
-				local recipe = Config.Recipes[carrying.Recipe]
-				say(label, ("Carrying %d %s"):format(carrying.Count, treatWord(recipe, carrying.Count)))
-				local target = plot.cases[key]
-				local facing = Vector3.new(target.origin.Position.X, target.stand.Y, target.origin.Position.Z)
-				if not helperWalk(plot, session, model, CFrame.lookAt(target.stand, facing), speed) then
-					return
-				end
-				-- The case may have been moved, stored or filled while the Stocker walked.
-				local case, stock = plot.cases[key], data.Stock[key]
-				if case and stock then
-					while carrying.Count > 0 and #stock < #case.slots do
-						table.insert(stock, carrying.Recipe)
-						carrying.Count -= 1
+					local target = plot.cases[key]
+					local facing = Vector3.new(target.origin.Position.X, target.stand.Y, target.origin.Position.Z)
+					if not helperWalk(plot, session, model, CFrame.lookAt(target.stand, facing), speed) then
+						return
 					end
-					refreshCase(plot, data, key)
-					syncStats(player)
+					-- The case may have been moved, stored or filled while the Stocker walked.
+					local case, stock = plot.cases[key], data.Stock[key]
+					if case and stock then
+						while carrying.Count > 0 and #stock < #case.slots do
+							table.insert(stock, carrying.Recipe)
+							carrying.Count -= 1
+						end
+						refreshCase(plot, data, key)
+						syncStats(player)
+					end
+					if carrying.Count == 0 then
+						carrying = nil
+						setHelperTray(model, nil)
+						label.Visible = false
+					end
+				elseif not oven then
+					if carrying then
+						say(label, "Cases are full!")
+					end
+					helperGoHome(plot, session, model, data, slot, speed)
 				end
-				if carrying.Count == 0 then
-					carrying = nil
-					setHelperTray(model, nil)
-					say(label, "Stocker")
+			elseif job == "Cashier" then
+				local spot = checkout.cashierSpot(plot, data)
+				if (model.PrimaryPart.Position - spot.Position).Magnitude > 1 then
+					if plot.cashierReady then
+						plot.cashierReady = false
+						checkout.update(plot)
+					end
+					say(label, "Off to the register")
+					if not helperWalk(plot, session, model, spot, speed) then
+						return
+					end
+					label.Visible = false
+				else
+					if not plot.cashierReady then
+						plot.cashierSlot, plot.cashierReady = slot, true
+						checkout.update(plot)
+					end
+					local front = plot.line[1]
+					if front and front.atSpot then
+						say(label, "Ringing you up!")
+						task.wait(employee.Trained and Config.Employees.TrainedCheckoutTime or Config.Employees.CheckoutTime)
+						if plot.session ~= session then
+							return
+						end
+						-- You may have checked them out yourself, or changed this job, meanwhile.
+						if plot.line[1] == front and data.Employees[slot] == employee and employee.Job == "Cashier" then
+							checkout.checkOut(plot)
+						end
+						label.Visible = false
+					end
 				end
-			elseif not oven then
-				if carrying then
-					say(label, "Cases are full!")
-				end
-				helperGoHome(plot, session, model, data, "Stocker", speed)
+			else
+				helperGoHome(plot, session, model, data, slot, speed)
 			end
 		end
 	end
@@ -3302,9 +3622,10 @@ local function claimPlot(player)
 			plot.flyerStand = buildFlyerStand(plot)
 			task.spawn(runFlyers, plot, plot.session, player)
 			plot.doorPart = buildDoorPrompt(plot)
-			refreshHelpers(plot, data)
-			task.spawn(runBaker, plot, plot.session, player)
-			task.spawn(runStocker, plot, plot.session, player)
+			refreshEmployees(plot, data)
+			for slot = 1, Config.Employees.Max do
+				task.spawn(runEmployee, plot, plot.session, player, slot)
+			end
 			task.spawn(runCrates, plot, plot.session, player)
 			return plot
 		end
@@ -3349,6 +3670,7 @@ local function releasePlot(player)
 	plot.cashierSlot, plot.cashierReady = nil, false
 	setActive(plot.registerPrompt, false)
 	plot.helpersFolder:ClearAllChildren()
+	plot.employeeNames, plot.building, plot.dressing = {}, {}, {}
 	showBoughtStations(plot, nil)
 	placeStations(plot, nil)
 	applyExpansion(plot, 0)
@@ -3777,6 +4099,11 @@ local function setUpPlot(model)
 		-- When the owner may next be told someone is waiting to pay.
 		nextLineNotice = 0,
 		helpersFolder = helpersFolder,
+		-- Each employee slot's name as typed (Raw) and as filtered for everyone (Shown),
+		-- and the slots being built or changing clothes.
+		employeeNames = {},
+		building = {},
+		dressing = {},
 		-- Outside the door, beside the customer path.
 		crateSpot = floor.CFrame * CFrame.new(9, floor.Size.Y / 2, 24),
 		crate = nil,
