@@ -528,25 +528,24 @@ local function canShip(order)
 	return true
 end
 
--- Returns text like "1 Butter, 2 Eggs" for what's missing, or nil when there's enough.
-local function missingIngredients(recipe, source)
+-- Each ingredient a recipe uses as needed/in the pantry, like "Flour 1/12, Butter 1/0",
+-- with the short ones in red (for a RichText label). Also returns true when any is short.
+local function ingredientCounts(recipe, source)
 	local pantry = (source or state).Pantry
-	local missing = {}
+	local parts = {}
+	local short = false
 	for _, ingredient in Config.Ingredients do
 		local need = recipe.Ingredients[ingredient.Id]
-		if need and pantry[ingredient.Id] < need then
-			table.insert(missing, ("%d %s"):format(need - pantry[ingredient.Id], ingredient.Name))
+		if need then
+			local text = ("%s %d/%d"):format(ingredient.Name, need, pantry[ingredient.Id])
+			if pantry[ingredient.Id] < need then
+				short = true
+				text = ('<font color="#D23C3C">%s</font>'):format(text)
+			end
+			table.insert(parts, text)
 		end
 	end
-	return #missing > 0 and table.concat(missing, ", ") or nil
-end
-
-local function pantrySummary(source)
-	local parts = {}
-	for _, ingredient in Config.Ingredients do
-		table.insert(parts, ("%s %d"):format(ingredient.Name, (source or state).Pantry[ingredient.Id]))
-	end
-	return table.concat(parts, ", ")
+	return table.concat(parts, ", "), short
 end
 
 local function placedCount(itemId)
@@ -686,26 +685,21 @@ function panels.Bake()
 	local work = state.Work or state
 	local ovenTime = Config.GetUpgrade("Oven").Levels[work.Levels.Oven].BakeTime
 	local batch = Config.GetUpgrade("Batch").Levels[work.Levels.Batch].BatchSize
-	addRow(state.Work and state.Work.OwnerName .. "'s pantry" or "Your pantry", pantrySummary(work), {})
 	for index = 1, work.RecipesUnlocked do
 		local recipe = Config.Recipes[index]
 		local title =
 			("%s: %d in %.1fs, %d coins each"):format(recipe.Name, batch, ovenTime * recipe.BakeScale, (customerPrice(recipe, work)))
-		local missing = missingIngredients(recipe, work)
-		if missing then
-			addRow(title, "Missing " .. missing, { { Text = "Need more", Color = GREY } })
-		else
-			addRow(title, "Uses " .. Config.DescribeIngredients(recipe.Ingredients), {
-				{
-					Text = "Bake",
-					Color = GREEN,
-					OnClick = function()
-						bakeEvent:FireServer(index)
-						setPanel(nil)
-					end,
-				},
-			})
-		end
+		local counts, short = ingredientCounts(recipe, work)
+		local action = short and { Text = "Need more", Color = GREY }
+			or {
+				Text = "Bake",
+				Color = GREEN,
+				OnClick = function()
+					bakeEvent:FireServer(index)
+					setPanel(nil)
+				end,
+			}
+		addRow(title, counts, { action }).Detail.RichText = true
 	end
 end
 
