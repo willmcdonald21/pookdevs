@@ -367,6 +367,10 @@ local function updateGuide(player)
 	end
 	if not plot or not data then
 		hint = "All bakeries are taken right now. Have a look around!"
+	elseif plot.line[1] and plot.line[1].atSpot and not plot.cashierReady then
+		-- Customers can't pay until someone checks them out.
+		hint = "A customer is waiting! Tap E at the register"
+		target = "Checkout"
 	elseif ready then
 		hint = ("Your %s batch is ready! Collect it from the %s"):format(ready.recipe.Name:lower(), ready.name:lower())
 		target = ready.model.Name
@@ -1933,17 +1937,6 @@ local function walkAround(model, to, speed, outside, stop)
 	end
 end
 
--- A spot along the front of the checkout counter, where customers pay.
-local function payPosition(plot, data)
-	local thing = stationThing(plot, data, "Checkout")
-	local front = thing.Front
-	local along = Vector3.new(thing.Facing.Z, 0, -thing.Facing.X)
-	local length = math.abs(along:Dot(Vector3.new(front.MaxX - front.MinX, 0, front.MaxZ - front.MinZ)))
-	local spread = math.clamp(length / 2 - 1.5, 0, 5)
-	local point = Layout.Center(front) + along * (math.random() * 2 - 1) * spread
-	return floorPoint(plot, point, CUSTOMER_HEIGHT)
-end
-
 local function say(label, text)
 	label.Text = text
 	label.Visible = true
@@ -2033,9 +2026,185 @@ local function edgeNear(point)
 	return edges[math.random(math.min(2, #edges))]
 end
 
--- Inside a bakery: a case with the treat they want if there is one, then the counter to
--- pay. They settle for something else if their treat isn't there, and tip when it is.
--- Stops early if the owner leaves.
+-- The checkout line. Customers who've chosen a treat wait in single file in front of the
+-- register, and pay when a Cashier employee or a player checks the first one out.
+-- plot.line holds them in order, and person.atSpot says whether they've reached their
+-- place in it. plot.cashierReady is true while a Cashier is standing at the register.
+local checkout = {}
+-- How far apart people stand in line.
+checkout.GAP = 2.5
+
+-- The point at the front of the counter in line with the register, the way customers
+-- face the counter, and the counter's depth, all on the floor's grid.
+function checkout.frame(plot, data)
+	local thing = stationThing(plot, data, "Checkout")
+	local facing, rect = thing.Facing, thing.Rect
+	local depth = math.abs(facing:Dot(Vector3.new(rect.MaxX - rect.MinX, 0, rect.MaxZ - rect.MinZ)))
+	local center = Layout.Center(rect)
+	local across = Vector3.new(facing.Z, 0, -facing.X)
+	local register = plot.floorTop:PointToObjectSpace(plot.registerPart.Position)
+	return center + across * across:Dot(register - center), facing, depth
+end
+
+function checkout.insideWalls(data, point)
+	local bounds = plotBounds(data)
+	return Vector3.new(math.clamp(point.X, bounds.MinX + 1, bounds.MaxX - 1), 0, math.clamp(point.Z, bounds.MinZ + 1, bounds.MaxZ - 1))
+end
+
+-- Where the index-th person in line stands: the first at the register, and each after
+-- them a step further out, kept inside the walls. Also returns the point they face.
+function checkout.spot(plot, data, index)
+	local point, facing, depth = checkout.frame(plot, data)
+	local spot = checkout.insideWalls(data, point + facing * (depth / 2 + 1.5 + (index - 1) * checkout.GAP))
+	return floorPoint(plot, spot, CUSTOMER_HEIGHT), floorPoint(plot, point, CUSTOMER_HEIGHT)
+end
+
+-- Where a Cashier stands: behind the register, facing the customers.
+function checkout.cashierSpot(plot, data)
+	local point, facing, depth = checkout.frame(plot, data)
+	local spot = floorPoint(plot, checkout.insideWalls(data, point - facing * (depth / 2 + 1.2)), CUSTOMER_HEIGHT)
+	return CFrame.lookAt(spot, floorPoint(plot, point + facing * 5, CUSTOMER_HEIGHT))
+end
+
+-- Called whenever the line or the Cashier changes. The register's prompt shows while the
+-- first person is waiting at it, and when nobody is there to check them out, the owner is
+-- told and guided to the register.
+function checkout.update(plot)
+	local front = plot.line[1]
+	local waiting = front ~= nil and front.atSpot == true
+	if plot.registerPrompt:GetAttribute("Active") ~= waiting then
+		setActive(plot.registerPrompt, waiting)
+	end
+	if waiting then
+		say(front.label, "Ready to pay!")
+		if not plot.cashierReady and plot.owner and os.clock() >= plot.nextLineNotice then
+			plot.nextLineNotice = os.clock() + 10
+			notify(plot.owner, "A customer is ready to pay at the register!", "Ding")
+		end
+	end
+	if plot.owner then
+		updateGuide(plot.owner)
+		for _, coBaker in coBakersOf(plot) do
+			updateGuide(coBaker)
+		end
+	end
+end
+
+-- Pays the owner for what the person chose. They tip when it's the treat they wanted,
+-- and golden customers pay more and sometimes give a Sugar Star.
+function checkout.pay(plot, person)
+	local owner = plot.owner
+	local data = owner and PlayerData.Get(owner)
+	if not data then
+		return
+	end
+	local recipe = person.recipe
+	local price = salePrice(data, recipe)
+	if bakeSaleOn(data) then
+		price = math.max(1, math.floor(price * (1 - Config.BakeSale.Discount)))
+	end
+	local stars = 0
+	if person.golden then
+		price *= Config.GoldenCustomer.PayScale
+		if math.random() < Config.GoldenCustomer.StarChance then
+			stars = 1
+		end
+	end
+	-- Bake Together: the owner gets a bonus for each active co-baker, and each of them
+	-- gets a share of the price. These are new coins, so nobody earns less.
+	local helping = activeCoBakers(plot)
+	local coins = earn(owner, data, price * (1 + Config.CoBake.OwnerBonus * #helping))
+	for _, coBaker in helping do
+		local coData = PlayerData.Get(coBaker)
+		local share = coData and earn(coBaker, coData, price * Config.CoBake.Share) or 0
+		-- Syncing the owner below syncs co-bakers too.
+		if share > 0 then
+			notify(coBaker, ("+%d coins: you helped sell a %s"):format(share, recipe.Name:lower()), "Coin")
+		end
+	end
+	local tipCoins = 0
+	if person.gotWanted then
+		local share = Config.WantedTip.Min + math.random() * (Config.WantedTip.Max - Config.WantedTip.Min)
+		local tip = math.floor(price * share + 0.5)
+		if tip > 0 then
+			tipCoins = earn(owner, data, tip)
+		end
+	end
+	data.Stars += stars
+	addGoalProgress(data, "Sell", table.find(Config.Recipes, recipe))
+	syncStats(owner)
+	if person.golden then
+		local tips = {}
+		if tipCoins > 0 then
+			table.insert(tips, ("%d coins"):format(tipCoins))
+		end
+		if stars > 0 then
+			table.insert(tips, "a Sugar Star")
+		end
+		local tipText = #tips > 0 and " and tipped " .. table.concat(tips, " and ") or ""
+		notify(owner, ("+%d coins: a golden customer bought %s%s!"):format(coins, recipe.Name:lower(), tipText), "Coin")
+	elseif tipCoins > 0 then
+		notify(owner, ("+%d coins: %s sold, +%d tip!"):format(coins, recipe.Name, tipCoins), "Coin")
+	else
+		notify(owner, ("+%d coins: %s sold"):format(coins, recipe.Name), "Coin")
+	end
+end
+
+-- Checks out the first person in line, once they're standing at the register. Returns
+-- whether anyone was checked out.
+function checkout.checkOut(plot)
+	local person = plot.line[1]
+	if not person or not person.atSpot then
+		return false
+	end
+	table.remove(plot.line, 1)
+	person.paid = true
+	say(person.label, "Thank you!")
+	checkout.pay(plot, person)
+	checkout.update(plot)
+	return true
+end
+
+-- A customer joins the end of the line and waits there until they've paid, stepping up as
+-- the line moves and following the register if the counter moves. Returns false if the
+-- owner leaves first.
+function checkout.wait(plot, session, person)
+	local model = person.model
+	person.paid, person.atSpot = false, false
+	table.insert(plot.line, person)
+	local standing = nil
+	while plot.session == session and not person.paid do
+		local data = PlayerData.Get(plot.owner)
+		local index = table.find(plot.line, person)
+		if data and index then
+			local spot, register = checkout.spot(plot, data, index)
+			if not standing or (spot - standing).Magnitude > 0.5 then
+				person.atSpot = false
+				if index == 1 then
+					checkout.update(plot)
+				end
+				if (spot - model.PrimaryPart.Position).Magnitude > 4 then
+					walkAround(model, spot, person.speed)
+				else
+					walkCustomer(model, spot, person.speed)
+				end
+				if plot.session ~= session then
+					break
+				end
+				turnTo(model, register)
+				standing = spot
+				person.atSpot = true
+				checkout.update(plot)
+			end
+		end
+		task.wait(0.2)
+	end
+	return person.paid
+end
+
+-- Inside a bakery: a case with the treat they want if there is one, then the line at the
+-- register to pay. They settle for something else if their treat isn't there, and tip
+-- when it is. Stops early if the owner leaves.
 local function shopAt(plot, session, person)
 	local model, label = person.model, person.label
 	local wanted = person.wants
@@ -2076,60 +2245,10 @@ local function shopAt(plot, session, person)
 			-- Every treat's name takes an "s", like "cupcakes".
 			say(label, ("No %ss... %s it is!"):format(Config.Recipes[wanted].Name:lower(), recipe.Name:lower()))
 		end
-		walkAround(model, payPosition(plot, data), person.speed)
-		if gone() then
+		person.recipe, person.gotWanted = recipe, gotWanted
+		if not checkout.wait(plot, session, person) then
 			return
 		end
-		local price = salePrice(data, recipe)
-		if bakeSaleOn(data) then
-			price = math.max(1, math.floor(price * (1 - Config.BakeSale.Discount)))
-		end
-		local stars = 0
-		if person.golden then
-			price *= Config.GoldenCustomer.PayScale
-			if math.random() < Config.GoldenCustomer.StarChance then
-				stars = 1
-			end
-		end
-		-- Bake Together: the owner gets a bonus for each active co-baker, and each of them
-		-- gets a share of the price. These are new coins, so nobody earns less.
-		local helping = activeCoBakers(plot)
-		local coins = earn(owner, data, price * (1 + Config.CoBake.OwnerBonus * #helping))
-		for _, coBaker in helping do
-			local coData = PlayerData.Get(coBaker)
-			local share = coData and earn(coBaker, coData, price * Config.CoBake.Share) or 0
-			-- Syncing the owner below syncs co-bakers too.
-			if share > 0 then
-				notify(coBaker, ("+%d coins: you helped sell a %s"):format(share, recipe.Name:lower()), "Coin")
-			end
-		end
-		local tipCoins = 0
-		if gotWanted then
-			local share = Config.WantedTip.Min + math.random() * (Config.WantedTip.Max - Config.WantedTip.Min)
-			local tip = math.floor(price * share + 0.5)
-			if tip > 0 then
-				tipCoins = earn(owner, data, tip)
-			end
-		end
-		data.Stars += stars
-		addGoalProgress(data, "Sell", table.find(Config.Recipes, recipe))
-		syncStats(owner)
-		if person.golden then
-			local tips = {}
-			if tipCoins > 0 then
-				table.insert(tips, ("%d coins"):format(tipCoins))
-			end
-			if stars > 0 then
-				table.insert(tips, "a Sugar Star")
-			end
-			local tipText = #tips > 0 and " and tipped " .. table.concat(tips, " and ") or ""
-			notify(owner, ("+%d coins: a golden customer bought %s%s!"):format(coins, recipe.Name:lower(), tipText), "Coin")
-		elseif tipCoins > 0 then
-			notify(owner, ("+%d coins: %s sold, +%d tip!"):format(coins, recipe.Name, tipCoins), "Coin")
-		else
-			notify(owner, ("+%d coins: %s sold"):format(coins, recipe.Name), "Coin")
-		end
-		say(label, "Thank you!")
 		task.wait(0.8)
 	else
 		say(label, "Nothing to buy!")
@@ -3226,6 +3345,9 @@ local function releasePlot(player)
 	end
 	-- Customers on their way or inside see the session change and head back to the plaza.
 	plot.visitors = 0
+	plot.line = {}
+	plot.cashierSlot, plot.cashierReady = nil, false
+	setActive(plot.registerPrompt, false)
 	plot.helpersFolder:ClearAllChildren()
 	showBoughtStations(plot, nil)
 	placeStations(plot, nil)
@@ -3644,6 +3766,16 @@ local function setUpPlot(model)
 		mouth = nil,
 		-- Customers on their way to the bakery or inside it.
 		visitors = 0,
+		-- Customers waiting to pay, first in line first. See checkout.
+		line = {},
+		-- The register's Body part and its Check out prompt, set up below.
+		registerPart = nil,
+		registerPrompt = nil,
+		-- The slot of the Cashier standing at the register, if one is.
+		cashierSlot = nil,
+		cashierReady = false,
+		-- When the owner may next be told someone is waiting to pay.
+		nextLineNotice = 0,
 		helpersFolder = helpersFolder,
 		-- Outside the door, beside the customer path.
 		crateSpot = floor.CFrame * CFrame.new(9, floor.Size.Y / 2, 24),
@@ -3697,9 +3829,28 @@ local function setUpPlot(model)
 	setActive(plot.cookbookPrompt, false)
 	setActive(plot.pantryPrompt, false)
 	setActive(plot.packingPrompt, false)
-	-- Co-bakers can use the pantry shelf and packing table, but not the cookbook counter.
+	-- Co-bakers can use the pantry shelf, the packing table and the register, but not the
+	-- cookbook counter.
 	plot.pantryPrompt:SetAttribute("CoBake", true)
 	plot.packingPrompt:SetAttribute("CoBake", true)
+	-- Customers pay when someone taps the register's prompt, or when a Cashier is there.
+	plot.registerPart = model.Checkout.Register.Body
+	local registerPrompt = Instance.new("ProximityPrompt")
+	registerPrompt.Name = "CheckoutPrompt"
+	registerPrompt.ActionText = "Check out"
+	registerPrompt.ObjectText = "Register"
+	registerPrompt.HoldDuration = 0
+	registerPrompt.MaxActivationDistance = 10
+	registerPrompt.RequiresLineOfSight = false
+	registerPrompt:SetAttribute("CoBake", true)
+	setActive(registerPrompt, false)
+	registerPrompt.Parent = plot.registerPart
+	plot.registerPrompt = registerPrompt
+	registerPrompt.Triggered:Connect(function(player)
+		if canUse(player, plot, registerPrompt) and checkout.checkOut(plot) then
+			markActive(player)
+		end
+	end)
 	plot.cookbookPrompt.Triggered:Connect(function(player)
 		if canUse(player, plot, plot.cookbookPrompt) then
 			openPanelEvent:FireClient(player, "Cookbook")
