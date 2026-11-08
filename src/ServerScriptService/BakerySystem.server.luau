@@ -156,10 +156,6 @@ local function rushPower(data)
 	return power
 end
 
-local function maxVisitors(data)
-	return rushPower(data) > 1 and Config.MaxCustomersBoosted or Config.MaxCustomers
-end
-
 -- Coins are always whole. The tiny extra stops rounding error from losing a coin, as in
 -- 25 * 1.2 coming out a hair under 30.
 local function earn(player, data, amount)
@@ -2295,9 +2291,6 @@ local function visitBakery(person)
 		person.label.Visible = false
 		walkCustomer(model, plot.mouth, person.speed)
 	end
-	if plot.session == session then
-		plot.visitors -= 1
-	end
 	person.visit = nil
 	person.label.Visible = false
 	model:SetAttribute("Wants", nil)
@@ -2371,7 +2364,6 @@ end
 local function sendVisitor(plot, session, person)
 	person.visit = plot
 	person.visitSession = session
-	plot.visitors += 1
 end
 
 -- Sends someone to a bakery: one of the three free townsfolk nearest its path, or a
@@ -2565,9 +2557,7 @@ local function runCustomerSpawner(plot, session, player)
 		if progress >= 1 then
 			progress, gap = 0, customerGap()
 			for _ = 1, groupSize() do
-				if plot.visitors < maxVisitors(data) then
-					requestCustomer(plot, session)
-				end
+				requestCustomer(plot, session)
 			end
 		end
 	end
@@ -2579,7 +2569,6 @@ local FLYER_COLOR = Color3.fromRGB(255, 170, 200)
 local FLYER_WOOD = Color3.fromRGB(190, 140, 90)
 local FLYER_LEG_WOOD = Color3.fromRGB(150, 100, 65)
 local FLYER_SAYING = "Ooh, I'll take a look!"
-local FLYER_FULL_HINT_GAP = 10
 
 local function flyerPart(name, size, cframe, color, material, parent)
 	local part = Instance.new("Part")
@@ -2757,8 +2746,8 @@ end
 
 -- Whoever took the stack, the owner or a co-baker, carries it in their hand and hands out
 -- flyers to the townsfolk they walk past.
-local function runFlyers(plot, session, player)
-	local nextHandOut, nextFullHint = 0, 0
+local function runFlyers(plot, session)
+	local nextHandOut = 0
 	while plot.session == session do
 		task.wait(0.25)
 		refreshFlyerStand(plot)
@@ -2768,12 +2757,7 @@ local function runFlyers(plot, session, player)
 			local character = holder.Character
 			local root = character and character:FindFirstChild("HumanoidRootPart")
 			local person = root and nearestFree(root.Position, Config.Flyers.Reach)
-			if person and plot.visitors >= Config.MaxCustomersBoosted then
-				if os.clock() >= nextFullHint then
-					nextFullHint = os.clock() + FLYER_FULL_HINT_GAP
-					notify(holder, (holder == player and "Your" or "This") .. " bakery is full! Hand out more flyers in a moment")
-				end
-			elseif person then
+			if person then
 				local held = plot.heldFlyers and plot.heldFlyers:FindFirstChild("Sheet")
 				nextHandOut = os.clock() + Config.Flyers.Gap
 				plot.flyers -= 1
@@ -3620,7 +3604,7 @@ local function claimPlot(player)
 			task.spawn(runBakeSale, plot, plot.session, player)
 			plot.flyers, plot.flyersReadyAt = 0, 0
 			plot.flyerStand = buildFlyerStand(plot)
-			task.spawn(runFlyers, plot, plot.session, player)
+			task.spawn(runFlyers, plot, plot.session)
 			plot.doorPart = buildDoorPrompt(plot)
 			refreshEmployees(plot, data)
 			for slot = 1, Config.Employees.Max do
@@ -3665,7 +3649,6 @@ local function releasePlot(player)
 		plot.doorPart = nil
 	end
 	-- Customers on their way or inside see the session change and head back to the plaza.
-	plot.visitors = 0
 	plot.line = {}
 	plot.cashierSlot, plot.cashierReady = nil, false
 	setActive(plot.registerPrompt, false)
@@ -4086,8 +4069,6 @@ local function setUpPlot(model)
 		door = floor.CFrame * CFrame.new(0, 0.6, 19),
 		-- Where the bakery's path meets the plaza, set by setUpTown.
 		mouth = nil,
-		-- Customers on their way to the bakery or inside it.
-		visitors = 0,
 		-- Customers waiting to pay, first in line first. See checkout.
 		line = {},
 		-- The register's Body part and its Check out prompt, set up below.
