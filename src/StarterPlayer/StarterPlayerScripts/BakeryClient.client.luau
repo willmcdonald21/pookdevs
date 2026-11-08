@@ -686,6 +686,9 @@ do
 	local yes = button("Yes", UDim2.new(0.5, -12, 0, 52), UDim2.new(1, -8, 1, -10), Vector2.new(1, 1), GREEN, box)
 	yes.Text = "Yes"
 	yes.ZIndex = 13
+	local ok = button("Ok", UDim2.new(0.5, -12, 0, 52), UDim2.new(0.5, 0, 1, -10), Vector2.new(0.5, 1), GREEN, box)
+	ok.Text = "OK"
+	ok.ZIndex = 13
 
 	-- How many ingredients filling the pantry takes, and what they cost.
 	local function everything()
@@ -700,22 +703,33 @@ do
 		return count, total
 	end
 
-	local function updateBox()
+	-- The box asks Yes / No when the coins are there, and otherwise just says how many more
+	-- are needed, with OK. If that changes while it's open, it closes rather than swap the
+	-- buttons under the player's finger.
+	local function updateBox(opening)
 		local count, total = everything()
-		if count == 0 then
+		local short = total - state.Coins
+		if count == 0 or (not opening and (short <= 0) ~= yes.Visible) then
 			box.Visible = false
 			return
 		end
-		question.Text = ("Buy %d ingredients for %s coins?"):format(count, withCommas(total))
-		local short = total - state.Coins
-		note.Text = short > 0 and ("You need %s more coins"):format(withCommas(short)) or "This fills your whole pantry"
-		yes.BackgroundColor3 = short > 0 and GREY or GREEN
-		yes.AutoButtonColor = short <= 0
+		yes.Visible = short <= 0
+		no.Visible = short <= 0
+		ok.Visible = short > 0
+		if short > 0 then
+			question.Text = ("Filling your pantry costs %s coins"):format(withCommas(total))
+			note.Text = ("You need %s more coins"):format(withCommas(short))
+		else
+			question.Text = ("Buy %d ingredients for %s coins?"):format(count, withCommas(total))
+			note.Text = "This fills your whole pantry"
+		end
 	end
 
-	no.Activated:Connect(function()
-		box.Visible = false
-	end)
+	for _, close in { no, ok } do
+		close.Activated:Connect(function()
+			box.Visible = false
+		end)
+	end
 	yes.Activated:Connect(function()
 		local count, total = everything()
 		if count > 0 and total <= state.Coins then
@@ -730,7 +744,7 @@ do
 			Text = "Buy all",
 			Color = GOLD,
 			OnClick = function()
-				updateBox()
+				updateBox(true)
 				box.Visible = true
 			end,
 		} or { Text = "Full", Color = GREY }
