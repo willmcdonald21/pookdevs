@@ -2986,9 +2986,10 @@ end
 
 -- Customer walking
 -- Townsfolk and helpers are Roblox avatars moved by the server. Each one plays Roblox's
--- default walk while its Walking attribute is on, timed to its Speed attribute, and the
--- default idle otherwise, and blinks now and then. This sits in a block, and its numbers
--- are written in place, because the script is close to Luau's limit of 200 locals.
+-- default walk while its Walking attribute is on, timed to its Speed attribute, the default
+-- sit while its Sitting attribute is on, and the default idle otherwise, and blinks now
+-- and then. This sits in a block, and its numbers are written in place, because the script
+-- is close to Luau's limit of 200 locals.
 do
 	local function watchCustomer(model)
 		local humanoid = model:WaitForChild("Humanoid", 5)
@@ -3005,30 +3006,39 @@ do
 		end
 		local walk = load("rbxassetid://913402848")
 		local idle = load("rbxassetid://507766388")
+		local sit = load("rbxassetid://2506281703")
 		idle:Play(0)
 		load("rbxassetid://14366558676"):Play()
 		local function update()
 			-- Roblox's Animate script plays the walk at normal speed for 6.4 studs a second.
 			local speed = (model:GetAttribute("Speed") or Config.CustomerSpeed) / 6.4
-			if model:GetAttribute("Walking") then
+			if model:GetAttribute("Sitting") then
+				walk:Stop(0.2)
+				idle:Stop(0.2)
+				sit:Play(0.3)
+			elseif model:GetAttribute("Walking") then
 				if walk.IsPlaying then
 					walk:AdjustSpeed(speed)
 				else
 					walk:Play(0.2, 1, speed)
 					idle:Stop(0.2)
+					sit:Stop(0.2)
 				end
 			else
 				-- Pathfinding walks a person from step to step, so a short stop doesn't end
 				-- the walk.
 				task.delay(0.15, function()
-					if not model:GetAttribute("Walking") and walk.IsPlaying then
+					local busy = model:GetAttribute("Walking") or model:GetAttribute("Sitting")
+					if not busy and (walk.IsPlaying or sit.IsPlaying) then
 						walk:Stop(0.25)
+						sit:Stop(0.25)
 						idle:Play(0.25)
 					end
 				end)
 			end
 		end
 		model:GetAttributeChangedSignal("Walking"):Connect(update)
+		model:GetAttributeChangedSignal("Sitting"):Connect(update)
 		update()
 	end
 
