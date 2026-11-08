@@ -793,6 +793,8 @@ local function syncStats(player, skipCoBakers)
 		LuxuryOven = data.LuxuryOven,
 		Expansion = data.Expansion,
 		Paint = data.Paint,
+		Floor = data.Floor,
+		SparePaint = data.SparePaint,
 		Charm = totalCharm(data),
 		Orders = orders,
 		CanAfford = canAffordUpgrade(data),
@@ -1186,6 +1188,40 @@ local function nextPlacedKey(data)
 	return tostring(index)
 end
 
+-- The colours of paintable pieces that are bought or put away but not placed, kept in
+-- data.SparePaint by item Id, newest last.
+local sparePaint = {}
+
+-- Remembers a colour for a new or put-away copy, or the piece's original colour.
+function sparePaint.push(data, item, paintId)
+	if Config.IsPaintable(item) then
+		local list = data.SparePaint[item.Id] or {}
+		table.insert(list, Config.GetPaint(paintId) and paintId or Config.OriginalPaint(item))
+		data.SparePaint[item.Id] = list
+	end
+end
+
+-- Takes the newest colour for a copy being placed, or nil when there's none.
+function sparePaint.pop(data, item)
+	local list = data.SparePaint[item.Id]
+	local paintId = list and table.remove(list)
+	if list and #list == 0 then
+		data.SparePaint[item.Id] = nil
+	end
+	return paintId
+end
+
+-- After a spare copy is sold, drops the oldest colours that no copy is left for.
+function sparePaint.fit(data, item)
+	local list = data.SparePaint[item.Id]
+	while list and #list > data.Owned[item.Id] - placedCount(data, item.Id) do
+		table.remove(list, 1)
+	end
+	if list and #list == 0 then
+		data.SparePaint[item.Id] = nil
+	end
+end
+
 -- Sells one owned copy of an item, if it can be sold, and says what it paid. The money is
 -- added straight to the save, so no boost ever makes a sale pay more than its share.
 local function sellOne(player, data, item)
@@ -1226,6 +1262,9 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 			storePlaced(plot, data, id)
 			if action == "Sell" then
 				sellOne(player, data, item)
+			else
+				-- A piece put away keeps its colour for when it's placed again.
+				sparePaint.push(data, item, entry.Paint)
 			end
 			refreshEmployees(plot, data)
 		end
@@ -1236,6 +1275,7 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 		local item = Config.GetItem(id)
 		if item and Config.IsAllowed(item, player.UserId) and data.Owned[id] - placedCount(data, id) > 0 then
 			sellOne(player, data, item)
+			sparePaint.fit(data, item)
 			syncStats(player)
 		end
 		return
@@ -1281,8 +1321,12 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 	else
 		if action == "Move" then
 			unbuildPlaced(plot, key)
-		elseif Config.GetItem(id).Slots then
-			data.Stock[key] = {}
+		else
+			-- A new piece takes the newest colour bought or put away for it.
+			entry.Paint = sparePaint.pop(data, Config.GetItem(id))
+			if Config.GetItem(id).Slots then
+				data.Stock[key] = {}
+			end
 		end
 		data.Placed[key] = entry
 		buildPlaced(plot, data, key)
@@ -1335,9 +1379,95 @@ local function buyWithStars(player, data, cost)
 	return true
 end
 
--- "Paint" takes a paint target's Id and a paint Id, and "PaintCase" a placed display
--- case's key and a paint Id.
-purchaseEvent.OnServerEvent:Connect(function(player, kind, id, paintId)
+-- Floor tiles. Each laid tile is a thin part on top of the floor, in plot.tileFolder, built
+-- from data.Floor. Tiles at the walls are cut to fit, so they're laid again when the
+-- bakery grows.
+local floorTiles = {}
+floorTiles.THICKNESS = 0.03
+-- The most tile keys one purchase can send.
+floorTiles.MAX_KEYS = 300
+
+-- Lays tile key in its saved style, or takes it up when it has none or data is nil.
+function floorTiles.lay(plot, data, key)
+	local old = plot.tileFolder:FindFirstChild(key)
+	if old then
+		old:Destroy()
+	end
+	local style = data and Config.GetFloor(data.Floor[key])
+	local i, j = Layout.TileOfKey(key)
+	local rect = style and Layout.TileRect(i, j, plotBounds(data))
+	if not rect then
+		return
+	end
+	local part = Instance.new("Part")
+	part.Name = key
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Material = style.Material
+	part.Color = Config.TileColor(style, i, j)
+	part.Size = Vector3.new(rect.MaxX - rect.MinX, floorTiles.THICKNESS, rect.MaxZ - rect.MinZ)
+	part.CFrame = plot.floorTop * CFrame.new(Layout.Center(rect) + Vector3.new(0, floorTiles.THICKNESS / 2, 0))
+	part.Parent = plot.tileFolder
+end
+
+-- Lays every saved tile at the bakery's size, or takes them all up when data is nil.
+function floorTiles.build(plot, data)
+	plot.tileFolder:ClearAllChildren()
+	if data then
+		for key in data.Floor do
+			floorTiles.lay(plot, data, key)
+		end
+	end
+end
+
+-- Lays a style on the tiles in keys that are inside the walls and not that style yet,
+-- paying for each. With fill, it's all of them or none. Otherwise it lays as many as the
+-- coins cover, in order. Laying the original floor takes tiles up for free.
+function floorTiles.buy(player, plot, data, style, keys, fill)
+	local bounds = plotBounds(data)
+	local changing, seen = {}, {}
+	for _, sent in keys do
+		local i, j = Layout.TileOfKey(sent)
+		local key = i and Layout.TileKey(i, j)
+		if key and not seen[key] and Layout.TileRect(i, j, bounds) and (data.Floor[key] or "Original") ~= style.Id then
+			seen[key] = true
+			table.insert(changing, key)
+		end
+	end
+	if #changing == 0 then
+		return
+	end
+	local count = #changing
+	if not fill and style.Coins > 0 then
+		count = math.min(count, math.floor(data.Coins / style.Coins))
+	end
+	-- When not even one tile is covered, buy says how many more coins are needed.
+	if not buy(player, data, math.max(count, 1) * style.Coins) then
+		return
+	end
+	for index = 1, count do
+		local key = changing[index]
+		data.Floor[key] = style.Id ~= "Original" and style.Id or nil
+		floorTiles.lay(plot, data, key)
+	end
+	syncStats(player)
+	if count < #changing then
+		notify(player, ("You need %d more coins for the rest"):format((#changing - count) * style.Coins - data.Coins))
+	elseif fill and style.Coins > 0 then
+		notify(player, ("Your floor is %s now! %d tiles for %d coins"):format(style.Name, count, count * style.Coins), "Coin")
+	elseif fill then
+		notify(player, "Your floor is back to the original planks", "Coin")
+	end
+end
+
+-- "Item" takes an item's Id and, for a paintable piece, the paint Id picked for it.
+-- "Paint" takes a paint target's Id and a paint Id, and "PaintCase" a placed paintable
+-- piece's key and a paint Id. "Floor" takes a floor style's Id and a list of tile keys,
+-- and "FloorFill" a floor style's Id.
+purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 	local data = PlayerData.Get(player)
 	local plot = playerPlots[player]
 	if not data or not plot then
@@ -1382,6 +1512,8 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, paintId)
 		end
 		if paid then
 			data.Owned[id] += 1
+			-- A paintable piece comes in the colour picked when buying it.
+			sparePaint.push(data, item, extra)
 			syncStats(player)
 			notify(player, item.Name .. " bought! Press Place to put it in your bakery", "Coin")
 		end
@@ -1407,6 +1539,7 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, paintId)
 			data.Expansion += 1
 			applyExpansion(plot, data.Expansion)
 			moveWallPieces(plot, data, old, plotBounds(data))
+			floorTiles.build(plot, data)
 			syncStats(player)
 			notify(player, "Your bakery is bigger! Decorate the new space", "Coin")
 		end
@@ -1418,15 +1551,28 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, paintId)
 			local left = math.ceil((data.BuzzUntil - os.time()) / 60)
 			notify(player, ("Bakery Buzz! Extra customers for the next %d min"):format(left), "Ding")
 		end
+	elseif kind == "Floor" or kind == "FloorFill" then
+		local style = Config.GetFloor(id)
+		local keys = extra
+		if kind == "FloorFill" then
+			keys = {}
+			for _, tile in Layout.Tiles(plotBounds(data)) do
+				table.insert(keys, tile.Key)
+			end
+		end
+		if style and type(keys) == "table" and #keys <= floorTiles.MAX_KEYS then
+			floorTiles.buy(player, plot, data, style, keys, kind == "FloorFill")
+		end
 	elseif kind == "Paint" or kind == "PaintCase" then
-		local paint = Config.GetPaint(paintId)
+		local paint = Config.GetPaint(extra)
 		local target = kind == "Paint" and Config.GetPaintTarget(id)
 		local case = kind == "PaintCase" and type(id) == "string" and data.Placed[id]
+		local piece = case and Config.GetItem(case.Id)
 		local name, current, cost
 		if target and paint and Config.CanPaint(target, paint) then
 			name, current, cost = target.Name, data.Paint[target.Id] or target.Original, target.Coins
-		elseif case and paint and Config.GetItem(case.Id).Slots then
-			name, current, cost = Config.GetItem(case.Id).Name, case.Paint or Config.CaseOriginalPaint, Config.CasePaintCoins
+		elseif piece and paint and Config.IsPaintable(piece) then
+			name, current, cost = piece.Name, case.Paint or Config.OriginalPaint(piece), Config.PiecePaintCoins
 		else
 			return
 		end
@@ -3724,6 +3870,7 @@ local function claimPlot(player)
 			setActive(plot.packingPrompt, true)
 			applyExpansion(plot, data.Expansion)
 			applyPaint(plot, data)
+			floorTiles.build(plot, data)
 			showBoughtStations(plot, data)
 			placeStations(plot, data)
 			for key in data.Placed do
@@ -3791,6 +3938,7 @@ local function releasePlot(player)
 	placeStations(plot, nil)
 	applyExpansion(plot, 0)
 	applyPaint(plot, nil)
+	floorTiles.build(plot, nil)
 	removeCrate(plot)
 	showSaleBanner(plot, false)
 	removeFlyerStand(plot)
@@ -4246,6 +4394,9 @@ local function setUpPlot(model)
 	end
 	plot.floorExtension = floor:Clone()
 	plot.floorExtension.Name = "FloorExtension"
+	plot.tileFolder = Instance.new("Folder")
+	plot.tileFolder.Name = "FloorTiles"
+	plot.tileFolder.Parent = model
 	-- Each paintable wall and oven part's starting colour, by paint target.
 	plot.paintParts = {}
 	for _, target in Config.PaintTargets do
