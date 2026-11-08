@@ -62,6 +62,10 @@ local hotbars = {}
 -- Players who've switched to running. It lasts the visit, through respawns.
 local running = {}
 local refreshEmployees
+-- The Sweet Stash, the storage room behind the back wall: its room, door and whiteboard,
+-- its shelves, and which treat each display case is kept for. Its functions are defined
+-- further down, next to what they use.
+local stash = {}
 -- Bake Together. coBakers maps each co-baker to the bakery they're working in, and
 -- lastAction to when they last did something there. friendPairs[a][b] is true when a and
 -- b are Roblox friends in this server.
@@ -266,10 +270,12 @@ local function placedCount(data, itemId)
 	return count
 end
 
+-- Display cases customers can shop from, not counting Stash Shelves.
 local function placedCaseCount(data)
 	local count = 0
 	for _, entry in data.Placed do
-		if Config.GetItem(entry.Id).Slots then
+		local item = Config.GetItem(entry.Id)
+		if item.Slots and not item.Room then
 			count += 1
 		end
 	end
@@ -314,13 +320,18 @@ local function hasOrderItems(data, order)
 	return true
 end
 
+-- A display case with room, or else a Stash Shelf with room, and whether it's a shelf.
 local function findCaseWithRoom(plot, data)
+	local shelf = nil
 	for key, case in plot.cases do
 		if #data.Stock[key] < #case.slots then
-			return key, case
+			if not case.shelf then
+				return key, case, false
+			end
+			shelf = shelf or case
 		end
 	end
-	return nil
+	return nil, shelf, shelf ~= nil
 end
 
 -- A bought station, like the Luxury Oven, is only in the bakery once its owner has
@@ -371,8 +382,11 @@ local function updateGuide(player)
 		hint = ("Your %s batch is ready! Collect it from the %s"):format(ready.recipe.Name:lower(), ready.name:lower())
 		target = ready.model.Name
 	elseif trayTotal(data) > 0 then
-		local _, case = findCaseWithRoom(plot, host)
-		if case then
+		local _, case, shelf = findCaseWithRoom(plot, host)
+		if shelf then
+			hint = ("Your cases are full! Put extra treats on a shelf in %s"):format(Config.Stash.Name)
+			target = case.model.Name
+		elseif case then
 			hint = "Put your treats in a display case"
 			target = case.model.Name
 		else
@@ -665,8 +679,15 @@ local function stationEntries(plot, data)
 	return entries
 end
 
+-- Every piece and station, and the stash's doorway and whiteboard once it's bought.
 local function layoutThings(plot, data)
-	return Layout.AllThings(data.Placed, stationEntries(plot, data), plot.stationShapes)
+	local things = Layout.AllThings(data.Placed, stationEntries(plot, data), plot.stationShapes)
+	if data.Stash then
+		for _, thing in Layout.StashThings(data.Expansion) do
+			table.insert(things, thing)
+		end
+	end
+	return things
 end
 
 -- Where a newly bought station goes: its default spot if that's free, or else the
@@ -791,6 +812,7 @@ local function syncStats(player, skipCoBakers)
 		Placed = data.Placed,
 		Stations = plot and stationEntries(plot, data) or {},
 		LuxuryOven = data.LuxuryOven,
+		Stash = data.Stash,
 		Expansion = data.Expansion,
 		Paint = data.Paint,
 		Floor = data.Floor,
@@ -1065,7 +1087,16 @@ local function refreshCase(plot, data, key)
 		ItemBuilder.Anchor(item)
 		item.Parent = case.items
 	end
-	case.prompt.ObjectText = ("%d/%d treats"):format(#stock, #case.slots)
+	-- A case kept for one treat says so. Only the Stocker keeps to it.
+	local count = ("%d/%d treats"):format(#stock, #case.slots)
+	local treat = not case.shelf and data.Placed[key] and data.Placed[key].Treat
+	if case.shelf then
+		case.prompt.ObjectText = "Stash · " .. count
+	elseif treat then
+		case.prompt.ObjectText = ("%ss only · %s"):format(Config.Recipes[treat].Name, count)
+	else
+		case.prompt.ObjectText = count
+	end
 end
 
 -- Treats move from the player's own tray into the case, which belongs to the bakery's
@@ -1083,7 +1114,7 @@ local function stockCase(plot, player, key)
 	end
 	local stock = host.Stock[key]
 	if #stock >= #case.slots then
-		notify(player, "This case is full")
+		notify(player, case.shelf and "This shelf is full" or "This case is full")
 		return
 	end
 	markActive(player)
@@ -1103,7 +1134,9 @@ local function stockCase(plot, player, key)
 	syncWork(player, plot)
 end
 
-local function addCase(plot, key, model, origin, slots, promptParent, stand)
+-- A Stash Shelf (shelf true) is stocked the same way, and has a second prompt that takes
+-- its treats back onto your tray. Its prompts go when its model does.
+local function addCase(plot, key, model, origin, slots, promptParent, stand, shelf)
 	local items = Instance.new("Folder")
 	items.Name = "Items"
 	items.Parent = model
@@ -1111,7 +1144,7 @@ local function addCase(plot, key, model, origin, slots, promptParent, stand)
 	if not prompt then
 		prompt = Instance.new("ProximityPrompt")
 		prompt.Name = "Prompt"
-		prompt.ActionText = "Stock Case"
+		prompt.ActionText = shelf and "Stock Shelf" or "Stock Case"
 		prompt.HoldDuration = 0
 		prompt.MaxActivationDistance = 8
 		prompt.RequiresLineOfSight = false
@@ -1122,6 +1155,17 @@ local function addCase(plot, key, model, origin, slots, promptParent, stand)
 	local connection = prompt.Triggered:Connect(function(player)
 		stockCase(plot, player, key)
 	end)
+	if shelf then
+		local take = prompt:Clone()
+		take.Name = "TakePrompt"
+		take.ActionText = "Take Treats"
+		take.KeyboardKeyCode = Enum.KeyCode.F
+		take.GamepadKeyCode = Enum.KeyCode.ButtonY
+		take.Parent = promptParent
+		take.Triggered:Connect(function(player)
+			stash.take(plot, player, key)
+		end)
+	end
 	plot.cases[key] = {
 		model = model,
 		origin = origin,
@@ -1130,6 +1174,7 @@ local function addCase(plot, key, model, origin, slots, promptParent, stand)
 		prompt = prompt,
 		stand = stand,
 		connection = connection,
+		shelf = shelf == true,
 	}
 end
 
@@ -1153,7 +1198,7 @@ local function buildPlaced(plot, data, key)
 	if item.Slots then
 		local front = Layout.ItemThing(key, entry).Front
 		local stand = floorPoint(plot, Layout.Center(front), CUSTOMER_HEIGHT)
-		addCase(plot, key, model, origin, item.Slots, model.PrimaryPart, stand)
+		addCase(plot, key, model, origin, item.Slots, model.PrimaryPart, stand, item.Room ~= nil)
 		refreshCase(plot, data, key)
 	end
 end
@@ -1222,6 +1267,204 @@ function sparePaint.fit(data, item)
 	end
 end
 
+-- Takes treats off a Stash Shelf onto the player's own tray, as many as fit. A selected
+-- hotbar box takes only that treat. Otherwise the priciest treats come first.
+function stash.take(plot, player, key)
+	local data = PlayerData.Get(player)
+	local host = plot.owner and PlayerData.Get(plot.owner)
+	local case = plot.cases[key]
+	local prompt = case and case.prompt.Parent:FindFirstChild("TakePrompt")
+	if not prompt or not data or not host or not canUse(player, plot, prompt) then
+		return
+	end
+	local stock = host.Stock[key]
+	local space = trayCapacity(data) - trayTotal(data)
+	if #stock == 0 then
+		notify(player, "This shelf is empty")
+		return
+	elseif space <= 0 then
+		notify(player, "Your tray is full! Stock a case first")
+		return
+	end
+	markActive(player)
+	local bar = hotbars[player]
+	local selected = bar and bar.Selected and bar.Slots[bar.Selected]
+	local taken = 0
+	for index = #Config.Recipes, 1, -1 do
+		if not selected or index == selected then
+			for slot = #stock, 1, -1 do
+				if taken < space and stock[slot] == index then
+					table.remove(stock, slot)
+					data.Tray[index] += 1
+					taken += 1
+				end
+			end
+		end
+	end
+	if taken == 0 then
+		notify(player, ("There are no %ss on this shelf"):format(Config.Recipes[selected].Name:lower()))
+		return
+	end
+	refreshCase(plot, host, key)
+	syncWork(player, plot)
+end
+
+-- True when the Stocker may put this treat (a Config.Recipes index) in the case with this
+-- key: it's a display case, not a shelf, and it isn't kept for a different treat.
+function stash.accepts(plot, data, key, recipe)
+	local case, entry = plot.cases[key], data.Placed[key]
+	return case ~= nil and not case.shelf and entry ~= nil and (entry.Treat == nil or entry.Treat == recipe)
+end
+
+-- Free slots on the Stash Shelves.
+function stash.shelfRoom(plot, data)
+	local room = 0
+	for key, case in plot.cases do
+		if case.shelf then
+			room += #case.slots - #data.Stock[key]
+		end
+	end
+	return room
+end
+
+-- The nearest Stash Shelf to from with room left.
+function stash.shelfWithRoom(plot, data, from)
+	local best, bestDistance = nil, math.huge
+	for key, case in plot.cases do
+		local distance = (case.stand - from).Magnitude
+		if case.shelf and #data.Stock[key] < #case.slots and distance < bestDistance then
+			best, bestDistance = key, distance
+		end
+	end
+	return best
+end
+
+-- The size and CFrame of the back wall's pieces left of, right of and above the door at
+-- an expansion level, and where the room's template is pivoted to.
+function stash.wallCut(plot, level)
+	local bounds = Layout.Bounds(level)
+	local door = Layout.Stash
+	-- The back wall reaches 1 stud past each side wall's inside face.
+	local left, right = bounds.MinX - 1, bounds.MaxX + 1
+	local top = Layout.WallHeight + 0.5
+	local bottom = -0.5
+	local z = bounds.MinZ - 0.5
+	local function piece(minX, maxX, minY, maxY)
+		return Vector3.new(maxX - minX, maxY - minY, 1),
+			plot.floorTop * CFrame.new((minX + maxX) / 2, (minY + maxY) / 2, z)
+	end
+	return {
+		Left = { piece(left, door.DoorMinX, bottom, top) },
+		Right = { piece(door.DoorMaxX, right, bottom, top) },
+		Top = { piece(door.DoorMinX, door.DoorMaxX, door.DoorHeight, top) },
+		Pivot = plot.floorTop * CFrame.new(0, 0, bounds.MinZ),
+	}
+end
+
+-- Builds the room and cuts the door when the owner has The Sweet Stash, at their bakery's
+-- size, or takes them away when data is nil or they don't. Run after applyExpansion, which
+-- puts the back wall back to one whole piece.
+function stash.place(plot, data)
+	local walls = plot.model.Walls
+	if not (data and data.Stash) then
+		if plot.stashRoom then
+			plot.stashRoom:Destroy()
+			plot.stashRoom = nil
+		end
+		plot.stashWallRight.Parent = nil
+		plot.stashWallTop.Parent = nil
+		return
+	end
+	local cut = stash.wallCut(plot, data.Expansion)
+	walls.BackWall.Size, walls.BackWall.CFrame = cut.Left[1], cut.Left[2]
+	plot.stashWallRight.Size, plot.stashWallRight.CFrame = cut.Right[1], cut.Right[2]
+	plot.stashWallTop.Size, plot.stashWallTop.CFrame = cut.Top[1], cut.Top[2]
+	plot.stashWallRight.Parent = walls
+	plot.stashWallTop.Parent = walls
+	if not plot.stashRoom then
+		plot.stashRoom = ServerStorage.StashRoom:Clone()
+		local prompt = plot.stashRoom.Whiteboard.Board.Prompt
+		setActive(prompt, true)
+		prompt.Triggered:Connect(function(player)
+			if canUse(player, plot, prompt) then
+				markActive(player)
+				openPanelEvent:FireClient(player, "Whiteboard")
+			end
+		end)
+		plot.stashRoom.Parent = plot.model
+	end
+	plot.stashRoom:PivotTo(cut.Pivot)
+end
+
+-- The first free spot for a placed floor piece, searching from the back wall forward, or
+-- nil when there's none. It keeps its turn.
+function stash.freeSpot(plot, data, key)
+	local entry = data.Placed[key]
+	local others = layoutThings(plot, data)
+	local bounds = plotBounds(data)
+	for z = bounds.MinZ - Layout.MinZ, bounds.MaxZ - Layout.MinZ - 1 do
+		for x = bounds.MinX - Layout.MinX, bounds.MaxX - Layout.MinX - 1 do
+			local spot = { Id = entry.Id, X = x, Z = z, R = entry.R, Paint = entry.Paint, Treat = entry.Treat }
+			if Layout.Check(Layout.ItemThing(key, spot), others, bounds) then
+				return spot
+			end
+		end
+	end
+	return nil
+end
+
+-- Clears the doorway once The Sweet Stash is bought (data.Stash is already true). Pieces
+-- in the way go to the inventory, with their treats onto the owner's tray, except the last
+-- display case, which moves like the stations do to the first free spot. Returns the
+-- names of what moved, and where.
+function stash.clearDoorway(plot, data)
+	local moved = {}
+	local doorway = Layout.StashThings(data.Expansion)
+	local bounds = plotBounds(data)
+	local function blocked(thing)
+		return not Layout.Check(thing, doorway, bounds)
+	end
+	for key, entry in data.Placed do
+		local item = Config.GetItem(entry.Id)
+		if not item.Room and blocked(Layout.ItemThing(key, entry)) then
+			local spot = item.Slots and placedCaseCount(data) <= 1 and stash.freeSpot(plot, data, key)
+			if spot then
+				unbuildPlaced(plot, key)
+				data.Placed[key] = spot
+				buildPlaced(plot, data, key)
+				table.insert(moved, item.Name .. " to a free spot")
+			else
+				storePlaced(plot, data, key)
+				sparePaint.push(data, item, entry.Paint)
+				table.insert(moved, item.Name .. " to your Inventory")
+			end
+		end
+	end
+	for id in plot.stations do
+		if hasStation(data, id) and blocked(stationThing(plot, data, id)) then
+			local spot = freeStationSpot(plot, data, id)
+			if spot then
+				data.Stations[id] = spot
+				moveStation(plot, id, spot)
+				table.insert(moved, Layout.GetStation(id).Name .. " to a free spot")
+			end
+		end
+	end
+	return moved
+end
+
+-- When the bakery grows from the old bounds to the new, the room moves back with the back
+-- wall, and its shelves and their treats go with it.
+function stash.moveShelves(plot, data, old, new)
+	for key, entry in data.Placed do
+		if Config.GetItem(entry.Id).Room then
+			entry.Z -= old.MinZ - new.MinZ
+			unbuildPlaced(plot, key)
+			buildPlaced(plot, data, key)
+		end
+	end
+end
+
 -- Sells one owned copy of an item, if it can be sold, and says what it paid. The money is
 -- added straight to the save, so no boost ever makes a sale pay more than its share.
 local function sellOne(player, data, item)
@@ -1254,7 +1497,7 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 		end
 		local item = Config.GetItem(entry.Id)
 		local amount, reason = Config.SellValue(item, data.Owned[item.Id])
-		if item.Slots and placedCaseCount(data) <= 1 then
+		if item.Slots and not item.Room and placedCaseCount(data) <= 1 then
 			notify(player, "Keep at least one display case so customers can shop")
 		elseif action == "Sell" and not amount then
 			notify(player, reason)
@@ -1280,6 +1523,19 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 		end
 		return
 	end
+	-- "Treat" keeps a display case for one treat (x is its Config.Recipes index), or for any
+	-- treat when x is nil. Only the Stocker keeps to it.
+	if action == "Treat" then
+		local entry = data.Placed[id]
+		local item = entry and Config.GetItem(entry.Id)
+		local valid = x == nil or (type(x) == "number" and x % 1 == 0 and x >= 1 and x <= data.RecipesUnlocked)
+		if item and item.Slots and not item.Room and valid and data.Stash then
+			entry.Treat = x
+			refreshCase(plot, data, id)
+			syncStats(player)
+		end
+		return
+	end
 	local entry = Layout.CleanEntry(x, z, r, y)
 	if not entry or (action ~= "New" and action ~= "Move") then
 		return
@@ -1287,7 +1543,7 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 	local key, thing
 	if action == "New" then
 		local item = Config.GetItem(id)
-		if not item or placedCount(data, id) >= data.Owned[id] then
+		if not item or placedCount(data, id) >= data.Owned[id] or (item.Room and not data.Stash) then
 			return
 		end
 		entry.Id = id
@@ -1297,8 +1553,9 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 		thing = Layout.StationThing(Layout.GetStation(id), plot.stations[id].shape, entry)
 	elseif data.Placed[id] then
 		entry.Id = data.Placed[id].Id
-		-- A painted case keeps its colour when it moves.
+		-- A painted case keeps its colour when it moves, and its treat.
 		entry.Paint = data.Placed[id].Paint
+		entry.Treat = data.Placed[id].Treat
 		key = id
 		thing = Layout.ItemThing(key, entry)
 	else
@@ -1309,7 +1566,9 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 	if wall ~= (entry.Y ~= nil) then
 		return
 	end
-	local fits, reason = Layout.Check(thing, layoutThings(plot, data), plotBounds(data))
+	-- Stash Shelves go in The Sweet Stash, and everything else in the bakery.
+	local bounds = key and Layout.BoundsFor(Config.GetItem(entry.Id), data.Expansion) or plotBounds(data)
+	local fits, reason = Layout.Check(thing, layoutThings(plot, data), bounds)
 	if not fits then
 		notify(player, reason)
 		syncStats(player)
@@ -1498,8 +1757,11 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 		if not item or item.OnlyFor then
 			return
 		end
-		-- Only a pass's owners can buy more of its items.
+		-- Only a pass's owners can buy more of its items, and Stash Shelves need the stash.
 		if item.Pass and not (item.ExtraCoins and PurchaseHandler.OwnsPass(player, item.Pass)) then
+			return
+		end
+		if item.Room and not data.Stash then
 			return
 		end
 		local paid
@@ -1515,7 +1777,27 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 			-- A paintable piece comes in the colour picked when buying it.
 			sparePaint.push(data, item, extra)
 			syncStats(player)
-			notify(player, item.Name .. " bought! Press Place to put it in your bakery", "Coin")
+			local where = item.Room and Config.Stash.Name or "your bakery"
+			notify(player, ("%s bought! Press Place to put it in %s"):format(item.Name, where), "Coin")
+		end
+	elseif kind == "Stash" and not data.Stash then
+		if buy(player, data, Config.Stash.Coins) then
+			data.Stash = true
+			local moved = stash.clearDoorway(plot, data)
+			stash.place(plot, data)
+			-- The new pieces of back wall take its paint.
+			applyPaint(plot, data)
+			refreshEmployees(plot, data)
+			syncStats(player)
+			-- One message, since each new one replaces the last.
+			local text = ("%s is open! It's through the new door in your back wall"):format(Config.Stash.Name)
+			if #moved > 0 then
+				text = ("%s is open! To make room for its door, we moved the %s"):format(
+					Config.Stash.Name,
+					table.concat(moved, ", the ")
+				)
+			end
+			notify(player, text, "Coin")
 		end
 	elseif kind == "LuxuryOven" and not data.LuxuryOven then
 		local cost = Config.LuxuryOven.Coins
@@ -1539,6 +1821,8 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 			data.Expansion += 1
 			applyExpansion(plot, data.Expansion)
 			moveWallPieces(plot, data, old, plotBounds(data))
+			stash.moveShelves(plot, data, old, plotBounds(data))
+			stash.place(plot, data)
 			floorTiles.build(plot, data)
 			syncStats(player)
 			notify(player, "Your bakery is bigger! Decorate the new space", "Coin")
@@ -2166,13 +2450,14 @@ end
 -- A random case holding the wanted treat, or else any stocked case, or nil when all are empty.
 local function pickStockedCase(plot, data, wanted)
 	local stocked, hasWanted = {}, {}
-	for key in plot.cases do
+	for key, case in plot.cases do
 		local stock = data.Stock[key]
-		if #stock > 0 then
+		-- Stash Shelves are in the storage room, so customers never shop from them.
+		if not case.shelf and #stock > 0 then
 			table.insert(stocked, key)
-		end
-		if table.find(stock, wanted) then
-			table.insert(hasWanted, key)
+			if table.find(stock, wanted) then
+				table.insert(hasWanted, key)
+			end
 		end
 	end
 	local keys = #hasWanted > 0 and hasWanted or stocked
@@ -3460,24 +3745,66 @@ local function randomBakeable(data)
 	return bakeable[math.random(math.max(#bakeable, 1))]
 end
 
-local function caseRoom(plot, data)
+-- Room for a treat (a Config.Recipes index) in the display cases the Stocker may put it in.
+local function caseRoom(plot, data, recipe)
 	local room = 0
 	for key, case in plot.cases do
-		room += #case.slots - #data.Stock[key]
+		if stash.accepts(plot, data, key, recipe) then
+			room += #case.slots - #data.Stock[key]
+		end
 	end
 	return room
 end
 
--- The nearest display case with room left.
-local function caseWithRoom(plot, data, from)
-	local best, bestDistance = nil, math.huge
+-- The nearest display case with room left that the Stocker may put a treat in. Cases kept
+-- for that treat come first, so cases for any treat stay free for the others.
+local function caseWithRoom(plot, data, from, recipe)
+	local best, bestRank = nil, math.huge
 	for key, case in plot.cases do
-		local distance = (case.stand - from).Magnitude
-		if #data.Stock[key] < #case.slots and distance < bestDistance then
-			best, bestDistance = key, distance
+		if stash.accepts(plot, data, key, recipe) and #data.Stock[key] < #case.slots then
+			local rank = (case.stand - from).Magnitude + (data.Placed[key].Treat and 0 or 100000)
+			if rank < bestRank then
+				best, bestRank = key, rank
+			end
 		end
 	end
 	return best
+end
+
+-- The nearest Stash Shelf holding a treat that a display case has room for again, and
+-- that treat, or nil.
+function stash.restockFrom(plot, data, from)
+	local best, bestRecipe, bestDistance = nil, nil, math.huge
+	for key, case in plot.cases do
+		local distance = (case.stand - from).Magnitude
+		if case.shelf and distance < bestDistance then
+			for _, recipe in data.Stock[key] do
+				if caseRoom(plot, data, recipe) > 0 then
+					best, bestRecipe, bestDistance = key, recipe, distance
+					break
+				end
+			end
+		end
+	end
+	return best, bestRecipe
+end
+
+-- Walks an employee to stand in front of a case or shelf, facing it. False when the owner
+-- left on the way.
+function stash.walkTo(plot, session, model, key, speed)
+	local target = plot.cases[key]
+	local facing = Vector3.new(target.origin.Position.X, target.stand.Y, target.origin.Position.Z)
+	return helperWalk(plot, session, model, CFrame.lookAt(target.stand, facing), speed)
+end
+
+-- True when the bakery has a Stash Shelf placed.
+function stash.hasShelf(plot)
+	for _, case in plot.cases do
+		if case.shelf then
+			return true
+		end
+	end
+	return false
 end
 
 -- One loop for each employee slot. Each pass does one whole task of the employee's job, so
@@ -3486,11 +3813,15 @@ end
 -- The Baker fetches ingredients from the pantry shelf, carries them to an empty oven, and
 -- bakes a random treat you have ingredients for once they're standing at it.
 --
--- The Stocker takes as much of a finished batch as the cases have room for, walks it to
--- the cases one at a time, and puts each treat in when they get there. Treats they're
--- still carrying when the cases fill up wait on their tray until there's room again, even
--- if their job changes. What they carry is lost if the owner leaves, like a batch left in
--- an oven.
+-- The Stocker takes as much of a finished batch as the cases and Stash Shelves have room
+-- for, walks it to the cases one at a time, and puts each treat in when they get there. A
+-- case kept for one treat only gets that treat from them. What doesn't fit in a case goes
+-- on the nearest Stash Shelf, and when a case has room again they bring treats from the
+-- shelves to it. In order, they do whichever comes first of: a batch with a case to go
+-- to, treats on the shelves that a case has room for, and a batch with only shelf room.
+-- Treats they're still carrying when everything fills up wait on their tray until there's
+-- room again, even if their job changes. What they carry is lost if the owner leaves, like
+-- a batch left in an oven.
 --
 -- The Cashier stands behind the register and checks out whoever is first in line.
 local function runEmployee(plot, session, player, slot)
@@ -3537,16 +3868,30 @@ local function runEmployee(plot, session, player, slot)
 					helperGoHome(plot, session, model, data, slot, speed)
 				end
 			elseif job == "Stocker" then
-				local oven = not carrying and caseRoom(plot, data) > 0 and firstOven(plot, data, "ready")
+				local oven, shelf, shelfRecipe = nil, nil, nil
+				if not carrying then
+					local ready = firstOven(plot, data, "ready")
+					local readyRecipe = ready and table.find(Config.Recipes, ready.recipe)
+					if ready and caseRoom(plot, data, readyRecipe) > 0 then
+						oven = ready
+					else
+						shelf, shelfRecipe = stash.restockFrom(plot, data, model.PrimaryPart.Position)
+						if not shelf and ready and stash.shelfRoom(plot, data) > 0 then
+							oven = ready
+						end
+					end
+				end
 				if oven then
 					say(label, "Fetching treats")
 					if not helperWalk(plot, session, model, ovenSpot(plot, data, slot, oven.model.Name), speed) then
 						return
 					end
 					-- You may have collected the batch while the Stocker was walking.
-					local take = oven.state == "ready" and math.min(oven.count, caseRoom(plot, data)) or 0
+					local recipe = oven.state == "ready" and table.find(Config.Recipes, oven.recipe)
+					local room = recipe and caseRoom(plot, data, recipe) + stash.shelfRoom(plot, data) or 0
+					local take = math.min(oven.count, room)
 					if take > 0 then
-						carrying = { Recipe = table.find(Config.Recipes, oven.recipe), Count = take }
+						carrying = { Recipe = recipe, Count = take }
 						oven.count -= take
 						if oven.count == 0 then
 							resetOven(oven)
@@ -3556,23 +3901,48 @@ local function runEmployee(plot, session, player, slot)
 						setHelperTray(model, carrying.Recipe)
 						syncStats(player)
 					end
-				end
-				local key = carrying and caseWithRoom(plot, data, model.PrimaryPart.Position)
-				if key then
-					local recipe = Config.Recipes[carrying.Recipe]
-					if employee.Job == "Stocker" then
-						say(label, ("Carrying %d %s"):format(carrying.Count, treatWord(recipe, carrying.Count)))
-					else
-						say(label, "Finishing up")
-					end
-					local target = plot.cases[key]
-					local facing = Vector3.new(target.origin.Position.X, target.stand.Y, target.origin.Position.Z)
-					if not helperWalk(plot, session, model, CFrame.lookAt(target.stand, facing), speed) then
+				elseif shelf then
+					say(label, "Restocking " .. treatWord(Config.Recipes[shelfRecipe], 2))
+					if not stash.walkTo(plot, session, model, shelf, speed) then
 						return
 					end
-					-- The case may have been moved, stored or filled while the Stocker walked.
+					-- The shelf may have been moved, stored or emptied while the Stocker walked,
+					-- and the cases filled.
+					local stock = plot.cases[shelf] and data.Stock[shelf] or {}
+					local want, take = caseRoom(plot, data, shelfRecipe), 0
+					for index = #stock, 1, -1 do
+						if take < want and stock[index] == shelfRecipe then
+							table.remove(stock, index)
+							take += 1
+						end
+					end
+					if take > 0 then
+						carrying = { Recipe = shelfRecipe, Count = take }
+						setHelperTray(model, shelfRecipe)
+						refreshCase(plot, data, shelf)
+						syncStats(player)
+					end
+				end
+				local from = model.PrimaryPart.Position
+				local key = carrying
+					and (caseWithRoom(plot, data, from, carrying.Recipe) or stash.shelfWithRoom(plot, data, from))
+				if key then
+					local recipe = Config.Recipes[carrying.Recipe]
+					local count = ("%d %s"):format(carrying.Count, treatWord(recipe, carrying.Count))
+					if employee.Job ~= "Stocker" then
+						say(label, "Finishing up")
+					elseif plot.cases[key].shelf then
+						say(label, ("Taking %s to the stash"):format(count))
+					else
+						say(label, "Carrying " .. count)
+					end
+					if not stash.walkTo(plot, session, model, key, speed) then
+						return
+					end
+					-- The case may have been moved, stored, filled or kept for another treat
+					-- while the Stocker walked.
 					local case, stock = plot.cases[key], data.Stock[key]
-					if case and stock then
+					if case and stock and (case.shelf or stash.accepts(plot, data, key, carrying.Recipe)) then
 						while carrying.Count > 0 and #stock < #case.slots do
 							table.insert(stock, carrying.Recipe)
 							carrying.Count -= 1
@@ -3585,9 +3955,9 @@ local function runEmployee(plot, session, player, slot)
 						setHelperTray(model, nil)
 						label.Visible = false
 					end
-				elseif not oven then
+				elseif not oven and not shelf then
 					if carrying then
-						say(label, "Cases are full!")
+						say(label, stash.hasShelf(plot) and "Shelves are full!" or "Cases are full!")
 					end
 					helperGoHome(plot, session, model, data, slot, speed)
 				end
@@ -3869,6 +4239,7 @@ local function claimPlot(player)
 			setActive(plot.pantryPrompt, true)
 			setActive(plot.packingPrompt, true)
 			applyExpansion(plot, data.Expansion)
+			stash.place(plot, data)
 			applyPaint(plot, data)
 			floorTiles.build(plot, data)
 			showBoughtStations(plot, data)
@@ -3937,6 +4308,7 @@ local function releasePlot(player)
 	showBoughtStations(plot, nil)
 	placeStations(plot, nil)
 	applyExpansion(plot, 0)
+	stash.place(plot, nil)
 	applyPaint(plot, nil)
 	floorTiles.build(plot, nil)
 	removeCrate(plot)
@@ -4038,8 +4410,10 @@ local function sellWhileAway(player, data)
 	local sold, coins = 0, 0
 	while sold < visits do
 		local stocked = {}
-		for _, stock in data.Stock do
-			if #stock > 0 then
+		for key, stock in data.Stock do
+			-- Treats on Stash Shelves wait there, since customers never go into the stash.
+			local entry = data.Placed[key]
+			if #stock > 0 and not (entry and Config.GetItem(entry.Id).Room) then
 				table.insert(stocked, stock)
 			end
 		end
@@ -4381,6 +4755,8 @@ local function setUpPlot(model)
 		flyerHolder = nil,
 		heldFlyers = nil,
 		saleBanner = nil,
+		-- The Sweet Stash's room, once its owner has bought it. See stash.place.
+		stashRoom = nil,
 	}
 	for slot in Config.DeliveryTiers do
 		plot.orderTokens[slot] = 0
@@ -4399,10 +4775,21 @@ local function setUpPlot(model)
 	plot.tileFolder.Parent = model
 	-- Each paintable wall and oven part's starting colour, by paint target.
 	plot.paintParts = {}
+	-- The Sweet Stash's door is cut by shrinking the back wall to the part left of it and
+	-- adding these, right of it and above it. They wait out of the world until then, and
+	-- take the back wall's paint.
+	plot.stashWallRight = model.Walls.BackWall:Clone()
+	plot.stashWallRight.Name = "BackWallRight"
+	plot.stashWallTop = model.Walls.BackWall:Clone()
+	plot.stashWallTop.Name = "BackWallTop"
 	for _, target in Config.PaintTargets do
 		local parts = {}
 		for _, name in target.Walls or {} do
 			parts[model.Walls[name]] = model.Walls[name].Color
+			if name == "BackWall" then
+				parts[plot.stashWallRight] = model.Walls[name].Color
+				parts[plot.stashWallTop] = model.Walls[name].Color
+			end
 		end
 		for _, name in target.Oven or {} do
 			parts[model.Oven[name]] = model.Oven[name].Color
