@@ -560,6 +560,8 @@ end
 
 -- Panel contents
 local setPanel
+local currentPanel = nil
+local refreshPanel
 local refreshHotbarVisible
 local startPlacing
 -- The dressing room for employees, built further down.
@@ -884,9 +886,65 @@ local function saleText(item, placed)
 	return currency == "Stars" and starText(amount) or withCommas(amount) .. " coins"
 end
 
--- Floor has everything that stands on the floor, Wall has wall pieces, Paint colours the
--- walls, oven and cases, and Expansion makes the bakery bigger.
-local DECOR_TABS = { "Floor", "Wall", "Paint", "Expansion" }
+-- The Inventory tab's Sell needs a second tap, so sellConfirm remembers which item is
+-- waiting for it and until when: { Id, Until }.
+local sellConfirm = nil
+
+local function inventoryRows()
+	local any = false
+	for _, item in Config.Items do
+		local stored = state.Owned[item.Id] - placedCount(item.Id)
+		if Config.IsAllowed(item, player.UserId) and stored > 0 then
+			any = true
+			local price, reason = saleText(item, false)
+			local actions = {
+				{
+					Text = "Place",
+					Color = BLUE,
+					OnClick = function()
+						startPlacing(item.Id)
+					end,
+				},
+			}
+			if price then
+				local asking = sellConfirm and sellConfirm.Id == item.Id and os.clock() < sellConfirm.Until
+				table.insert(actions, {
+					Text = asking and "Sure?" or "Sell",
+					Color = GOLD,
+					OnClick = function()
+						if sellConfirm and sellConfirm.Id == item.Id and os.clock() < sellConfirm.Until then
+							sellConfirm = nil
+							placeEvent:FireServer("SellSpare", item.Id)
+							return
+						end
+						local confirm = { Id = item.Id, Until = os.clock() + Config.SellConfirmSeconds }
+						sellConfirm = confirm
+						refreshPanel()
+						task.delay(Config.SellConfirmSeconds, function()
+							if sellConfirm == confirm then
+								sellConfirm = nil
+								if currentPanel == "Decorate" then
+									refreshPanel()
+								end
+							end
+						end)
+					end,
+				})
+			end
+			local detail = price and ("You have %d. Sells for %s each"):format(stored, price)
+				or ("You have %d. %s"):format(stored, reason)
+			addRow(item.Name, detail, actions)
+		end
+	end
+	if not any then
+		addRow("Your inventory is empty", "Pick something up with Move things and press Inventory to keep it here", {})
+	end
+end
+
+-- Floor has everything that stands on the floor, Wall has wall pieces, Inventory has the
+-- pieces you've put away, Paint colours the walls, oven and cases, and Expansion makes the
+-- bakery bigger.
+local DECOR_TABS = { "Floor", "Wall", "Inventory", "Paint", "Expansion" }
 local decorTab = "Floor"
 
 function panels.Decorate()
@@ -900,6 +958,9 @@ function panels.Decorate()
 		return
 	elseif decorTab == "Expansion" then
 		expansionRows()
+		return
+	elseif decorTab == "Inventory" then
+		inventoryRows()
 		return
 	end
 	addRow("Move things", "Move or turn anything in your bakery, including the oven and counters", {
@@ -1412,9 +1473,7 @@ local function refreshBoostButton()
 	end
 end
 
-local currentPanel = nil
-
-local function refreshPanel()
+refreshPanel = function()
 	if not currentPanel or not state then
 		return
 	end
