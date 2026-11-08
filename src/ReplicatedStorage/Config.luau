@@ -497,6 +497,10 @@ Config.Items = {
 		Name = "Cafe Table",
 		Coins = 120,
 		Charm = 2,
+		Seats = {
+			{ At = Vector3.new(-1.9, 1.75, 0), Look = Vector3.new(1, 0, 0), From = Vector3.new(-3.9, 0, 0) },
+			{ At = Vector3.new(1.9, 1.75, 0), Look = Vector3.new(-1, 0, 0), From = Vector3.new(3.9, 0, 0) },
+		},
 		Parts = {
 			{ Kind = "Disc", Height = 0.3, Diameter = 3.6, Y = 3, Color = rgb(255, 245, 230) },
 			{ Kind = "Disc", Height = 3, Diameter = 0.4, Y = 1.5, Color = rgb(190, 130, 95) },
@@ -621,6 +625,7 @@ Config.Items = {
 		Pass = "CozyPack",
 		ExtraCoins = 250,
 		Charm = 4,
+		Seats = { { At = Vector3.new(0, 1.85, -0.2), Look = Vector3.new(0, 0, -1), From = Vector3.new(0, 0, -2.8) } },
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(3, 1.2, 3), Y = 0.9, Color = rgb(235, 120, 150), Material = Enum.Material.Fabric },
 			{ Kind = "Box", Size = Vector3.new(3, 2.6, 0.7), Y = 2.1, Z = 1.15, Color = rgb(235, 120, 150), Material = Enum.Material.Fabric },
@@ -1066,11 +1071,13 @@ Config.CustomerMinInterval = 3
 -- Charm speeds customers up by at most Max (0.5 is 50% faster). Charm of Half gets half of
 -- that, and each piece after that helps a little less.
 Config.CharmSpeed = { Max = 0.5, Half = 12 }
--- How many customers can be on their way or inside at once, normally and during a boost.
-Config.MaxCustomers = 3
-Config.MaxCustomersBoosted = 5
 Config.CustomerSpeed = 8
 Config.BrowseTime = 1.5
+-- After paying, a customer sits at a random free seat for SitTime seconds before leaving,
+-- if the bakery has one. Pieces with Seats, like the cafe table, can be sat on. Each seat
+-- gives the top of the seat (At), the way the sitter faces (Look) and the floor spot they
+-- step in from (From), relative to the piece like its Parts.
+Config.SitTime = { 30, 60 }
 -- Golden customers wear a crown, pay PayScale times the price, and sometimes tip a Star.
 Config.GoldenCustomer = { Chance = 1 / 12, PayScale = 3, StarChance = 1 / 3 }
 -- Customers arrive at random. Each wait is the usual interval times a factor from one of
@@ -1088,7 +1095,7 @@ Config.CustomerGap = {
 }
 
 -- Boosts. Each adds its Rush to how fast customers come: 0.5 is 50% more customers. They
--- add together, and while any is on, up to MaxCustomersBoosted can come at once.
+-- add together.
 -- A Bake Sale is free once every Cooldown seconds. For Duration seconds, customers pay
 -- Discount less (0.25 is 25% off). Deliveries and offline sales aren't discounted.
 Config.BakeSale = { Duration = 120, Cooldown = 60 * 60, Discount = 0.25, Rush = 0.5 }
