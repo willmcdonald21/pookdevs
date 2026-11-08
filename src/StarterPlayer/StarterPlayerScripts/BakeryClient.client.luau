@@ -871,6 +871,19 @@ local function expansionRows()
 	end
 end
 
+-- What selling one of an item pays, as text like "30 coins", or nil and why it can't be
+-- sold. Placed is true for a piece in the bakery, since your last display case stays.
+local function saleText(item, placed)
+	if placed and item.Slots and #paintableCases() <= 1 then
+		return nil, "Keep at least one display case so customers can shop"
+	end
+	local amount, currency = Config.SellValue(item, state.Owned[item.Id])
+	if not amount then
+		return nil, currency
+	end
+	return currency == "Stars" and starText(amount) or withCommas(amount) .. " coins"
+end
+
 -- Floor has everything that stands on the floor, Wall has wall pieces, Paint colours the
 -- walls, oven and cases, and Expansion makes the bakery bigger.
 local DECOR_TABS = { "Floor", "Wall", "Paint", "Expansion" }
@@ -1960,7 +1973,7 @@ placeBanner.ZIndex = 3
 
 local placeBar = Instance.new("Frame")
 placeBar.Name = "PlaceBar"
-placeBar.Size = UDim2.fromOffset(440, 46)
+placeBar.Size = UDim2.fromOffset(540, 46)
 placeBar.Position = UDim2.new(0.5, 0, 1, -10)
 placeBar.AnchorPoint = BOTTOM_CENTER
 placeBar.BackgroundTransparency = 1
@@ -1986,9 +1999,10 @@ end
 
 barButton("Rotate", 1, BLUE)
 barButton("Place", 2, GREEN)
-barButton("Store", 3, GOLD)
-barButton("Cancel", 4, PINK)
-barButton("Done", 5, PINK)
+barButton("Sell", 3, GOLD)
+barButton("Inventory", 4, BLUE)
+barButton("Cancel", 5, PINK)
+barButton("Done", 6, PINK)
 
 -- The hotbar shares the bottom of the screen with these buttons and sits under open menus.
 refreshHotbarVisible = function()
@@ -2237,13 +2251,26 @@ local function refreshHeld()
 end
 
 -- Rotate always shows while decorating so players know it's there. It's grey until
--- something is picked up, and for wall pieces, which always face into the room.
+-- something is picked up, and for wall pieces, which always face into the room. Sell and
+-- Inventory show for a placed piece but never a station. Sell is grey when the piece
+-- can't be sold, and reads "Sure?" while it waits for the second tap.
 local function refreshBar()
 	placeBanner.Visible = decorating
 	placeBar.Visible = decorating
 	barButtons.Rotate.BackgroundColor3 = (held and not held.wall) and BLUE or GREY
 	barButtons.Place.Visible = held ~= nil
-	barButtons.Store.Visible = held ~= nil and held.key ~= nil and held.stationId == nil
+	local piece = held ~= nil and held.key ~= nil and held.stationId == nil
+	barButtons.Sell.Visible = piece
+	barButtons.Inventory.Visible = piece
+	if piece then
+		local selling = held.sellUntil ~= nil and os.clock() < held.sellUntil
+		barButtons.Sell.Text = selling and "Sure?" or "Sell"
+		barButtons.Sell.BackgroundColor3 = saleText(Config.GetItem(held.itemId), true) and GOLD or GREY
+		if selling then
+			placeBanner.Text = held.sellQuestion
+			placeBanner.BackgroundColor3 = GOLD
+		end
+	end
 	barButtons.Cancel.Visible = held ~= nil
 	barButtons.Done.Visible = held == nil
 	if decorating and not held then
@@ -2507,7 +2534,34 @@ barButtons.Place.Activated:Connect(tryPlace)
 barButtons.Cancel.Activated:Connect(function()
 	drop(false)
 end)
-barButtons.Store.Activated:Connect(function()
+-- The first tap asks, and a second tap within a few seconds sells. A piece that can't be
+-- sold says why instead.
+barButtons.Sell.Activated:Connect(function()
+	if not held or not held.key or held.stationId then
+		return
+	end
+	local item = Config.GetItem(held.itemId)
+	local price, reason = saleText(item, true)
+	if not price then
+		placeBanner.Text = reason
+		placeBanner.BackgroundColor3 = BLOCKED_COLOR
+	elseif held.sellUntil and os.clock() < held.sellUntil then
+		placeEvent:FireServer("Sell", held.key)
+		drop(true)
+	else
+		local asking = held
+		held.sellUntil = os.clock() + Config.SellConfirmSeconds
+		held.sellQuestion = ("Sell your %s for %s? Tap Sure? to sell it"):format(item.Name, price)
+		refreshBar()
+		task.delay(Config.SellConfirmSeconds, function()
+			if held == asking then
+				refreshHeld()
+				refreshBar()
+			end
+		end)
+	end
+end)
+barButtons.Inventory.Activated:Connect(function()
 	if held and held.key then
 		placeEvent:FireServer("Store", held.key)
 		drop(true)
