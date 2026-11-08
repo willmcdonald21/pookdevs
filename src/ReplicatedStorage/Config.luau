@@ -395,7 +395,8 @@ end
 -- pass's owners can buy more for that many coins each, but only one copy adds Charm.
 -- An item with Wall = true hangs on a wall and shows in the Decorate menu's Wall tab.
 -- Its origin is on the wall at the item's bottom, and its parts stick out toward -Z.
--- On a display case, parts with Paint = true take the colour the owner paints it.
+-- Parts with Paint = true take the colour the owner picks. Any item with such parts can be
+-- painted: its colour is chosen when it's bought, and changed later in the Paint tab.
 local CASE_PINK = rgb(240, 150, 175)
 local GLASS = rgb(210, 235, 245)
 
@@ -962,15 +963,19 @@ Config.Expansions = {
 	{ Coins = 18000, Back = 8, Side = 2 },
 }
 
--- Paint for the walls, the oven and each display case, bought in the Decorate menu's
--- Paint tab. Anything can use any colour, except that the oven can't use colours with
--- Oven = false. The oven gets no yellow or shiny paint, so only the Luxury Oven ever looks
--- gold, and the Luxury Oven can't be painted.
+-- Paint for the walls, the oven and each paintable piece, like a display case, bought in
+-- the Decorate menu's Paint tab. A piece's first colour is free, picked when it's bought.
+-- Anything can use any colour, except that the oven can't use colours with Oven = false.
+-- The oven gets no yellow or shiny paint, so only the Luxury Oven ever looks gold, and the
+-- Luxury Oven can't be painted.
 Config.WallPaintCoins = 25
 Config.OvenPaintCoins = 75
-Config.CasePaintCoins = 15
--- Display cases start in this colour.
-Config.CaseOriginalPaint = "Bubblegum"
+Config.PiecePaintCoins = 15
+-- Paintable pieces start in this colour, unless they give their own OriginalPaint.
+Config.PieceOriginalPaint = "Bubblegum"
+-- The old names, until the scripts use the new ones.
+Config.CasePaintCoins = Config.PiecePaintCoins
+Config.CaseOriginalPaint = Config.PieceOriginalPaint
 Config.Paints = {
 	{ Id = "Vanilla", Name = "Vanilla", Color = rgb(255, 240, 225) },
 	{ Id = "Snow", Name = "Snow", Color = rgb(250, 250, 252) },
@@ -1018,9 +1023,82 @@ function Config.GetPaintTarget(id)
 	return nil
 end
 
--- True when the target can be painted this colour. Display cases use every colour.
+-- True when the target can be painted this colour. Pieces use every colour.
 function Config.CanPaint(target, paint)
 	return not target.Oven or paint.Oven ~= false
+end
+
+-- True when some of an item's parts take paint, like a display case's cabinet and shelves.
+function Config.IsPaintable(item)
+	for _, spec in item.Parts do
+		if spec.Paint then
+			return true
+		end
+	end
+	return false
+end
+
+-- The colour a paintable piece starts in.
+function Config.OriginalPaint(item)
+	return item.OriginalPaint or Config.PieceOriginalPaint
+end
+
+-- Floor tiles, laid one at a time from the Decorate menu's Paint tab. The floor is a grid
+-- of squares (see Layout.TileSize), and each can be laid in any of these styles for Coins.
+-- Original is the bakery's own floor, so laying it takes a tile up, for free. A style with
+-- Check alternates between Color and Check from tile to tile, like a checkerboard.
+-- Fill floor lays every tile at once, after asking again, and waits ConfirmSeconds for
+-- the second tap.
+Config.FloorFill = { ConfirmSeconds = 3 }
+Config.Floors = {
+	{ Id = "Original", Name = "Cream Planks", Coins = 0, Material = Enum.Material.WoodPlanks, Color = rgb(245, 226, 200) },
+	{ Id = "Oak", Name = "Oak Planks", Coins = 6, Material = Enum.Material.WoodPlanks, Color = rgb(205, 155, 105) },
+	{ Id = "Walnut", Name = "Walnut Planks", Coins = 6, Material = Enum.Material.WoodPlanks, Color = rgb(120, 80, 55) },
+	{ Id = "Cherry", Name = "Cherry Planks", Coins = 6, Material = Enum.Material.WoodPlanks, Color = rgb(170, 90, 70) },
+	{ Id = "WhiteMarble", Name = "White Marble", Coins = 8, Material = Enum.Material.Marble, Color = rgb(245, 245, 248) },
+	{ Id = "PinkMarble", Name = "Pink Marble", Coins = 8, Material = Enum.Material.Marble, Color = rgb(250, 205, 215) },
+	{ Id = "Slate", Name = "Grey Slate", Coins = 8, Material = Enum.Material.Slate, Color = rgb(125, 125, 135) },
+	{ Id = "PinkTiles", Name = "Pink Tiles", Coins = 5, Material = Enum.Material.CeramicTiles, Color = rgb(255, 190, 205) },
+	{ Id = "MintTiles", Name = "Mint Tiles", Coins = 5, Material = Enum.Material.CeramicTiles, Color = rgb(175, 225, 205) },
+	{ Id = "SkyTiles", Name = "Sky Tiles", Coins = 5, Material = Enum.Material.CeramicTiles, Color = rgb(185, 220, 245) },
+	{ Id = "LemonTiles", Name = "Lemon Tiles", Coins = 5, Material = Enum.Material.CeramicTiles, Color = rgb(255, 240, 170) },
+	{
+		Id = "LavenderTiles",
+		Name = "Lavender Tiles",
+		Coins = 5,
+		Material = Enum.Material.CeramicTiles,
+		Color = rgb(215, 200, 240),
+	},
+	{
+		Id = "BlackCheck",
+		Name = "Black & White Check",
+		Coins = 10,
+		Material = Enum.Material.SmoothPlastic,
+		Color = rgb(45, 40, 50),
+		Check = rgb(250, 250, 250),
+	},
+	{
+		Id = "PinkCheck",
+		Name = "Pink & White Check",
+		Coins = 10,
+		Material = Enum.Material.SmoothPlastic,
+		Color = rgb(240, 150, 175),
+		Check = rgb(250, 250, 250),
+	},
+}
+
+function Config.GetFloor(id)
+	for _, floor in Config.Floors do
+		if floor.Id == id then
+			return floor
+		end
+	end
+	return nil
+end
+
+-- The colour of tile i, j in a floor style, so a checkerboard alternates.
+function Config.TileColor(floor, i, j)
+	return floor.Check and (i + j) % 2 == 1 and floor.Check or floor.Color
 end
 
 -- Delivery board: one order per tier at a time. Pay is the treats' sale price times PayScale.
