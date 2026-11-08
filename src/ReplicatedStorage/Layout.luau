@@ -364,4 +364,64 @@ function Layout.Check(thing, others, bounds)
 	return true
 end
 
+-- Floor tiles. The floor is a grid of TileSize-stud squares, each laid in its own style.
+-- Tile i, j starts TileSize * i studs right of MinX and TileSize * j studs in front of
+-- MinZ, so tiles line up with the middle of the floor and the starting back wall, and
+-- never move as the bakery grows. Tiles at the walls are cut to fit. Keys are "i,j".
+Layout.TileSize = 4
+
+function Layout.TileKey(i, j)
+	return i .. "," .. j
+end
+
+-- The i and j in a key, or nil when it isn't one.
+function Layout.TileOfKey(key)
+	if type(key) ~= "string" then
+		return nil
+	end
+	local i, j = key:match("^(%-?%d+),(%-?%d+)$")
+	if not i then
+		return nil
+	end
+	return tonumber(i), tonumber(j)
+end
+
+-- Tile i, j's square, cut to fit inside the walls, or nil when it's outside them.
+function Layout.TileRect(i, j, bounds)
+	local size = Layout.TileSize
+	local rect = {
+		MinX = math.max(Layout.MinX + i * size, bounds.MinX),
+		MaxX = math.min(Layout.MinX + (i + 1) * size, bounds.MaxX),
+		MinZ = math.max(Layout.MinZ + j * size, bounds.MinZ),
+		MaxZ = math.min(Layout.MinZ + (j + 1) * size, bounds.MaxZ),
+	}
+	if rect.MinX >= rect.MaxX or rect.MinZ >= rect.MaxZ then
+		return nil
+	end
+	return rect
+end
+
+local function tile(i, j, bounds)
+	local rect = Layout.TileRect(i, j, bounds)
+	return rect and { Key = Layout.TileKey(i, j), I = i, J = j, Rect = rect }
+end
+
+-- The tile at a floor point, as { Key, I, J, Rect }, or nil outside the walls.
+function Layout.TileAt(point, bounds)
+	local size = Layout.TileSize
+	return tile(math.floor((point.X - Layout.MinX) / size), math.floor((point.Z - Layout.MinZ) / size), bounds)
+end
+
+-- Every tile inside the walls, from the back left.
+function Layout.Tiles(bounds)
+	local size = Layout.TileSize
+	local tiles = {}
+	for j = math.floor((bounds.MinZ - Layout.MinZ) / size), math.ceil((bounds.MaxZ - Layout.MinZ) / size) - 1 do
+		for i = math.floor((bounds.MinX - Layout.MinX) / size), math.ceil((bounds.MaxX - Layout.MinX) / size) - 1 do
+			table.insert(tiles, tile(i, j, bounds))
+		end
+	end
+	return tiles
+end
+
 return Layout
