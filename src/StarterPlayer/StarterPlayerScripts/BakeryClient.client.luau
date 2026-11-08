@@ -564,6 +564,8 @@ end
 local setPanel
 local refreshHotbarVisible
 local startPlacing
+-- The dressing room for employees, built further down.
+local wardrobe
 
 local panels = {}
 
@@ -1009,6 +1011,139 @@ function panels.Deliveries()
 	end
 end
 
+-- Employees: a card for each place, with a picture of the employee, their job buttons, and
+-- Customize and Train. An empty place offers the next hire. Picking a job the other
+-- employee has swaps their jobs.
+function panels.Employees()
+	local settings = Config.Employees
+	local action = ReplicatedStorage:WaitForChild("EmployeeAction")
+	panelTitle.Text = "Employees"
+	addRow("Your staff", "Each one does a different job, and you do the job left over", {})
+	rowOrder += 1
+	local cards = Instance.new("Frame")
+	cards.Name = "Cards"
+	cards.Size = UDim2.new(1, -12, 0, 290)
+	cards.BackgroundTransparency = 1
+	cards.LayoutOrder = rowOrder
+	cards.ZIndex = 6
+	cards.Parent = rowList
+	for slot = 1, settings.Max do
+		local card = style(
+			Instance.new("Frame"),
+			"Card" .. slot,
+			UDim2.new(0.5, -4, 1, 0),
+			UDim2.new((slot - 1) * 0.5, (slot - 1) * 8, 0, 0),
+			TOP_LEFT,
+			WHITE
+		)
+		card.ZIndex = 6
+		card.Parent = cards
+		local function cardButton(name, text, color, size, position, onClick)
+			local object = button(name, size, position, TOP_LEFT, color, card)
+			object.Text = text
+			object.ZIndex = 7
+			object.AutoButtonColor = onClick ~= nil
+			if onClick then
+				object.Activated:Connect(onClick)
+			end
+			return object
+		end
+		local employee = state.Employees[slot]
+		if employee then
+			local picture = Instance.new("ViewportFrame")
+			picture.Name = "Picture"
+			picture.Size = UDim2.new(1, -12, 0, 118)
+			picture.Position = UDim2.fromOffset(6, 6)
+			picture.BackgroundColor3 = CREAM
+			picture.Ambient = Color3.fromRGB(200, 200, 200)
+			picture.LightColor = WHITE
+			picture.ZIndex = 7
+			picture.Parent = card
+			Instance.new("UICorner").Parent = picture
+			if not wardrobe.show(picture, slot, true) then
+				local waiting = label("Waiting", UDim2.fromScale(1, 1), UDim2.new(), TOP_LEFT, CREAM, BROWN, picture)
+				waiting.BackgroundTransparency = 1
+				waiting.Text = "On their way..."
+				waiting.ZIndex = 8
+			end
+			local name = label("EmployeeName", UDim2.new(1, -12, 0, 28), UDim2.fromOffset(6, 128), TOP_LEFT, WHITE, BROWN, card)
+			name.Text = (employee.Name ~= "" and employee.Name or "Employee " .. slot) .. (employee.Trained and " (trained)" or "")
+			name.ZIndex = 7
+			local info = label("Info", UDim2.new(1, -12, 0, 20), UDim2.fromOffset(6, 156), TOP_LEFT, WHITE, BROWN, card)
+			info.Text = settings.JobInfo[employee.Job] or ""
+			info.ZIndex = 7
+			-- Another employee's job is gold, because picking it swaps jobs with them.
+			local taken = {}
+			for otherSlot, other in state.Employees do
+				if otherSlot ~= slot then
+					taken[other.Job] = true
+				end
+			end
+			for index, job in settings.Jobs do
+				local color = employee.Job == job and PINK or taken[job] and GOLD or BLUE
+				cardButton(
+					job .. "Job",
+					job,
+					color,
+					UDim2.new(1 / 3, -6, 0, 40),
+					UDim2.new((index - 1) / 3, 4, 0, 182),
+					employee.Job ~= job and function()
+						action:FireServer("SetJob", slot, job)
+					end or nil
+				)
+			end
+			cardButton("Customize", "Customize", PINK, UDim2.new(0.5, -9, 0, 44), UDim2.fromOffset(6, 232), function()
+				wardrobe.open(slot)
+			end)
+			if employee.Trained then
+				cardButton("Train", "Trained!", GREY, UDim2.new(0.5, -9, 0, 44), UDim2.new(0.5, 3, 0, 232))
+			else
+				local cost = settings.TrainCost
+				cardButton(
+					"Train",
+					"Train: " .. withCommas(cost),
+					state.Coins >= cost and GREEN or GREY,
+					UDim2.new(0.5, -9, 0, 44),
+					UDim2.new(0.5, 3, 0, 232),
+					function()
+						action:FireServer("Train", slot)
+					end
+				)
+			end
+		else
+			local title = label("EmployeeName", UDim2.new(1, -12, 0, 30), UDim2.fromOffset(6, 40), TOP_LEFT, WHITE, BROWN, card)
+			title.Text = "Employee " .. slot
+			title.ZIndex = 7
+			local info = label("Info", UDim2.new(1, -12, 0, 60), UDim2.fromOffset(6, 80), TOP_LEFT, WHITE, BROWN, card)
+			info.TextWrapped = true
+			info.ZIndex = 7
+			if slot == #state.Employees + 1 then
+				local cost = settings.HireCost[slot]
+				info.Text = "Hire someone to run the register, bake or stock your cases"
+				cardButton(
+					"Hire",
+					"Hire: " .. withCommas(cost) .. " coins",
+					state.Coins >= cost and GREEN or GREY,
+					UDim2.new(1, -12, 0, 50),
+					UDim2.fromOffset(6, 160),
+					function()
+						action:FireServer("Hire")
+					end
+				)
+			else
+				info.Text = ("Hire your first employee, then this one for %s coins"):format(withCommas(settings.HireCost[slot]))
+			end
+		end
+	end
+	local cashier = false
+	for _, employee in state.Employees do
+		cashier = cashier or employee.Job == "Cashier"
+	end
+	if not cashier then
+		addRow("No Cashier?", "Customers wait at the register until you tap E there", {})
+	end
+end
+
 -- Bake Together: whose bakery you're in, who's in yours, and inviting friends.
 function panels.Friends()
 	panelTitle.Text = "Bake Together"
@@ -1303,11 +1438,369 @@ setPanel = function(name)
 		rowList.CanvasPosition = Vector2.zero
 		refreshPanel()
 	end
+	wardrobe.refresh()
 end
 
 local function togglePanel(name)
 	setPanel(currentPanel ~= name and name or nil)
 end
+
+-- The dressing room, laid out like the avatar editor on the Roblox website: on the left the
+-- employee's name over a picture of them turning slowly, which can be dragged round, and
+-- on the right a tab for each part of the wardrobe over a grid of pictures. Tapping a
+-- picture dresses the employee in the bakery too, and the picture here follows once they've
+-- changed. wardrobe.show draws an employee in any ViewportFrame, for the Employees cards.
+wardrobe = (function()
+	local action = ReplicatedStorage:WaitForChild("EmployeeAction")
+	local api = {}
+	-- The employee being dressed, the look picked here (the server catches up), and changes
+	-- not yet sent, by category. Changes go one at a time, a moment apart.
+	local current, look, category = nil, nil, Config.Wardrobe[1].Id
+	local unsent, sending = {}, false
+	local preview, watching = nil, nil
+	local angle, dragging, dragX = 0, false, 0
+
+	local function liveModel(slot)
+		for _, plot in plotsFolder:GetChildren() do
+			if plot:GetAttribute("OwnerId") == player.UserId then
+				local helpers = plot:FindFirstChild("Helpers")
+				return helpers and helpers:FindFirstChild("Employee" .. slot)
+			end
+		end
+		return nil
+	end
+
+	-- The same text the server keeps on the model as LookKey.
+	local function lookKey(chosen)
+		local parts = {}
+		for _, wardrobeCategory in Config.Wardrobe do
+			table.insert(parts, tostring(chosen[wardrobeCategory.Id]))
+		end
+		return table.concat(parts, "|")
+	end
+
+	-- Draws a copy of the employee: their head and shoulders, or all of them. Returns the
+	-- copy, or nil when they haven't arrived yet.
+	function api.show(viewport, slot, headAndShoulders)
+		for _, child in viewport:GetChildren() do
+			if child:IsA("WorldModel") or child:IsA("Camera") then
+				child:Destroy()
+			end
+		end
+		local model = liveModel(slot)
+		if not model then
+			return nil
+		end
+		local copy = model:Clone()
+		for _, part in copy:GetDescendants() do
+			if part:IsA("BillboardGui") or part.Name == "CarriedTray" then
+				part:Destroy()
+			end
+		end
+		copy:PivotTo(CFrame.new())
+		local world = Instance.new("WorldModel")
+		copy.Parent = world
+		world.Parent = viewport
+		local camera = Instance.new("Camera")
+		camera.FieldOfView = 40
+		if headAndShoulders then
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, 1.6, -5), Vector3.new(0, 1.2, 0))
+		else
+			camera.CFrame = CFrame.lookAt(Vector3.new(0, -0.2, -10.5), Vector3.new(0, -0.6, 0))
+		end
+		camera.Parent = viewport
+		viewport.CurrentCamera = camera
+		return copy
+	end
+
+	-- A little below the middle, so the hint along the top still shows.
+	local window = style(Instance.new("Frame"), "Wardrobe", UDim2.fromScale(0.94, 0.86), UDim2.new(0.5, 0, 0.5, 12), Vector2.new(0.5, 0.5), CREAM)
+	window.Visible = false
+	window.ZIndex = 20
+	window.Parent = gui
+	local limit = Instance.new("UISizeConstraint")
+	limit.MaxSize = Vector2.new(760, 500)
+	limit.Parent = window
+	local title = label("Title", UDim2.new(1, -130, 0, 40), UDim2.fromOffset(10, 8), TOP_LEFT, CREAM, BROWN, window)
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.ZIndex = 21
+	local done = button("Done", UDim2.fromOffset(100, 44), UDim2.new(1, -8, 0, 6), Vector2.new(1, 0), GREEN, window)
+	done.Text = "Done"
+	done.ZIndex = 21
+
+	local nameBox = style(Instance.new("TextBox"), "NameBox", UDim2.new(0.4, -14, 0, 40), UDim2.fromOffset(10, 54), TOP_LEFT, WHITE)
+	nameBox.Font = FONT
+	nameBox.TextScaled = true
+	nameBox.TextColor3 = BROWN
+	nameBox.PlaceholderText = "Type a name"
+	nameBox.ClearTextOnFocus = false
+	nameBox.Text = ""
+	nameBox.ZIndex = 21
+	nameBox.Parent = window
+	local view = Instance.new("ViewportFrame")
+	view.Name = "Preview"
+	view.Size = UDim2.new(0.4, -14, 1, -106)
+	view.Position = UDim2.fromOffset(10, 100)
+	view.BackgroundColor3 = WHITE
+	view.Ambient = Color3.fromRGB(200, 200, 200)
+	view.LightColor = WHITE
+	view.ZIndex = 21
+	view.Parent = window
+	Instance.new("UICorner").Parent = view
+	local note = label("Note", UDim2.new(1, -16, 0, 26), UDim2.new(0, 8, 1, -8), Vector2.new(0, 1), CREAM, BROWN, view)
+	note.BackgroundTransparency = 0.2
+	note.ZIndex = 22
+
+	local tabBox = Instance.new("Frame")
+	tabBox.Name = "Tabs"
+	tabBox.Size = UDim2.new(0.6, -10, 0, 40)
+	tabBox.Position = UDim2.new(0.4, 4, 0, 54)
+	tabBox.BackgroundTransparency = 1
+	tabBox.ZIndex = 21
+	tabBox.Parent = window
+	local tabList = Instance.new("UIListLayout")
+	tabList.FillDirection = Enum.FillDirection.Horizontal
+	tabList.Padding = UDim.new(0, 6)
+	tabList.SortOrder = Enum.SortOrder.LayoutOrder
+	tabList.Parent = tabBox
+	local grid = Instance.new("ScrollingFrame")
+	grid.Name = "Items"
+	grid.Size = UDim2.new(0.6, -10, 1, -106)
+	grid.Position = UDim2.new(0.4, 4, 0, 100)
+	grid.BackgroundTransparency = 1
+	grid.BorderSizePixel = 0
+	grid.ScrollBarThickness = 8
+	grid.ScrollBarImageColor3 = PINK
+	grid.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	grid.CanvasSize = UDim2.new()
+	grid.ZIndex = 21
+	grid.Parent = window
+	local gridLayout = Instance.new("UIGridLayout")
+	gridLayout.CellSize = UDim2.fromOffset(92, 112)
+	gridLayout.CellPadding = UDim2.fromOffset(8, 8)
+	gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	gridLayout.Parent = grid
+
+	local function send()
+		local categoryId, id = next(unsent)
+		if sending or not categoryId then
+			return
+		end
+		unsent[categoryId] = nil
+		sending = true
+		action:FireServer("SetLook", current, categoryId, id)
+		task.delay(0.25, function()
+			sending = false
+			send()
+		end)
+	end
+
+	-- "Dressing..." while the employee changes, and a hint once they're wearing it.
+	local function refreshNote()
+		local model = current and liveModel(current)
+		if not model then
+			note.Text = "On their way..."
+		elseif model:GetAttribute("LookKey") ~= lookKey(look) then
+			note.Text = "Dressing..."
+		else
+			note.Text = "Drag to turn"
+		end
+	end
+
+	local refreshGrid
+	local function showTabs()
+		for _, child in tabBox:GetChildren() do
+			if child:IsA("GuiButton") then
+				child:Destroy()
+			end
+		end
+		for index, wardrobeCategory in Config.Wardrobe do
+			local tab = button(wardrobeCategory.Id .. "Tab", UDim2.new(1 / #Config.Wardrobe, -6, 1, 0), UDim2.new(), TOP_LEFT, wardrobeCategory.Id == category and PINK or GREY, tabBox)
+			tab.Text = wardrobeCategory.Name
+			tab.LayoutOrder = index
+			tab.ZIndex = 22
+			tab.Activated:Connect(function()
+				category = wardrobeCategory.Id
+				showTabs()
+				refreshGrid()
+				grid.CanvasPosition = Vector2.zero
+			end)
+		end
+	end
+
+	refreshGrid = function()
+		for _, child in grid:GetChildren() do
+			if child:IsA("GuiObject") then
+				child:Destroy()
+			end
+		end
+		local items
+		for _, wardrobeCategory in Config.Wardrobe do
+			if wardrobeCategory.Id == category then
+				items = wardrobeCategory.Items
+			end
+		end
+		for index, item in items do
+			local tile = style(Instance.new("ImageButton"), "Item" .. index, UDim2.new(), UDim2.new(), TOP_LEFT, WHITE)
+			tile.LayoutOrder = index
+			tile.ZIndex = 22
+			tile.ScaleType = Enum.ScaleType.Fit
+			local stroke = Instance.new("UIStroke")
+			stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			stroke.Color = PINK
+			stroke.Thickness = 4
+			stroke.Enabled = look[category] == item.Id
+			stroke.Parent = tile
+			if item.Color then
+				local swatch = Instance.new("Frame")
+				swatch.Size = UDim2.fromScale(0.7, 0.7)
+				swatch.Position = UDim2.fromScale(0.5, 0.5)
+				swatch.AnchorPoint = Vector2.new(0.5, 0.5)
+				swatch.SizeConstraint = Enum.SizeConstraint.RelativeXX
+				swatch.BackgroundColor3 = item.Color
+				swatch.ZIndex = 23
+				local round = Instance.new("UICorner")
+				round.CornerRadius = UDim.new(0.5, 0)
+				round.Parent = swatch
+				swatch.Parent = tile
+			else
+				if item.Id ~= 0 then
+					tile.Image = ("rbxthumb://type=Asset&id=%d&w=150&h=150"):format(item.Id)
+				end
+				local name = label("Label", UDim2.new(1, -4, 0, 26), UDim2.new(0, 2, 1, -2), Vector2.new(0, 1), WHITE, BROWN, tile)
+				name.BackgroundTransparency = 0.15
+				name.TextWrapped = true
+				name.Text = item.Name
+				name.ZIndex = 23
+				name.UIPadding:Destroy()
+				-- Short names would otherwise grow to fill the label.
+				local textLimit = Instance.new("UITextSizeConstraint")
+				textLimit.MaxTextSize = 13
+				textLimit.Parent = name
+			end
+			tile.Parent = grid
+			tile.Activated:Connect(function()
+				if look[category] == item.Id then
+					return
+				end
+				look[category] = item.Id
+				unsent[category] = item.Id
+				send()
+				refreshGrid()
+				refreshNote()
+			end)
+		end
+	end
+
+	local function showPreview()
+		preview = current and api.show(view, current, false)
+		refreshNote()
+	end
+
+	-- Follows the employee in the bakery: their picture is taken again whenever they change.
+	local function watch()
+		if watching then
+			watching:Disconnect()
+			watching = nil
+		end
+		local model = current and liveModel(current)
+		if model then
+			watching = model:GetAttributeChangedSignal("LookKey"):Connect(showPreview)
+		end
+		showPreview()
+	end
+
+	local function close()
+		window.Visible = false
+		current = nil
+		preview = nil
+		if watching then
+			watching:Disconnect()
+			watching = nil
+		end
+		panel.Visible = currentPanel ~= nil
+	end
+	done.Activated:Connect(close)
+
+	function api.open(slot)
+		local employee = state.Employees[slot]
+		if not employee then
+			return
+		end
+		current = slot
+		look = table.clone(employee.Look)
+		table.clear(unsent)
+		nameBox.Text = employee.Name
+		title.Text = "Dress " .. (employee.Name ~= "" and employee.Name or "your employee")
+		angle = 0
+		window.Visible = true
+		panel.Visible = false
+		showTabs()
+		refreshGrid()
+		watch()
+	end
+
+	-- After each state update and menu change: closes with the Employees menu, and shows
+	-- the name once Roblox has filtered it.
+	function api.refresh()
+		if not current then
+			return
+		end
+		local employee = state.Employees[current]
+		if currentPanel ~= "Employees" or not employee then
+			close()
+			return
+		end
+		if not nameBox:IsFocused() then
+			nameBox.Text = employee.Name
+		end
+		title.Text = "Dress " .. (employee.Name ~= "" and employee.Name or "your employee")
+		if not watching then
+			watch()
+		end
+		refreshNote()
+	end
+
+	nameBox:GetPropertyChangedSignal("Text"):Connect(function()
+		local length = utf8.len(nameBox.Text)
+		if length and length > Config.Employees.NameLength then
+			nameBox.Text = nameBox.Text:sub(1, utf8.offset(nameBox.Text, Config.Employees.NameLength + 1) - 1)
+		end
+	end)
+	nameBox.FocusLost:Connect(function()
+		local employee = current and state.Employees[current]
+		if employee and nameBox.Text ~= employee.Name then
+			action:FireServer("Rename", current, nameBox.Text)
+		end
+	end)
+
+	view.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging, dragX = true, input.Position.X
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			angle += (input.Position.X - dragX) * 0.012
+			dragX = input.Position.X
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+	RunService.RenderStepped:Connect(function(delta)
+		if preview and window.Visible then
+			if not dragging then
+				angle += delta * 0.5
+			end
+			preview:PivotTo(CFrame.Angles(0, angle, 0))
+		end
+	end)
+
+	return api
+end)()
 
 shopButton.Activated:Connect(function()
 	togglePanel("Shop")
@@ -2180,6 +2673,7 @@ stateEvent.OnClientEvent:Connect(function(newState)
 		trayLabel.Text = carrying
 	end
 	refreshPanel()
+	wardrobe.refresh()
 	refreshDecorating()
 end)
 
