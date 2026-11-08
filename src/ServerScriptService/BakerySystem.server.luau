@@ -1186,8 +1186,24 @@ local function nextPlacedKey(data)
 	return tostring(index)
 end
 
+-- Sells one owned copy of an item, if it can be sold, and says what it paid. The money is
+-- added straight to the save, so no boost ever makes a sale pay more than its share.
+local function sellOne(player, data, item)
+	local amount, currency = Config.SellValue(item, data.Owned[item.Id])
+	if not amount then
+		notify(player, currency)
+		return
+	end
+	data.Owned[item.Id] -= 1
+	data[currency] += amount
+	local paid = currency == "Stars" and ("%d Sugar %s"):format(amount, amount == 1 and "Star" or "Stars")
+		or ("%d coins"):format(amount)
+	notify(player, ("Sold %s for %s"):format(item.Name, paid), "Coin")
+end
+
 -- "New" places an item from storage, "Move" moves a placed item or a station, and
--- "Store" puts a placed item back in storage. Wall pieces also send y, their height.
+-- "Store" puts a placed item back in storage. "Sell" sells a placed item, and "SellSpare"
+-- sells one stored copy of an item. Wall pieces also send y, their height.
 -- Every spot is checked here, whatever the client's preview said.
 placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 	local plot = playerPlots[player]
@@ -1195,18 +1211,33 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 	if not plot or not data or type(id) ~= "string" then
 		return
 	end
-	if action == "Store" then
+	if action == "Store" or action == "Sell" then
 		local entry = data.Placed[id]
 		if not entry then
 			return
 		end
-		if Config.GetItem(entry.Id).Slots and placedCaseCount(data) <= 1 then
+		local item = Config.GetItem(entry.Id)
+		local amount, reason = Config.SellValue(item, data.Owned[item.Id])
+		if item.Slots and placedCaseCount(data) <= 1 then
 			notify(player, "Keep at least one display case so customers can shop")
+		elseif action == "Sell" and not amount then
+			notify(player, reason)
 		else
 			storePlaced(plot, data, id)
+			if action == "Sell" then
+				sellOne(player, data, item)
+			end
 			refreshEmployees(plot, data)
 		end
 		syncStats(player)
+		return
+	end
+	if action == "SellSpare" then
+		local item = Config.GetItem(id)
+		if item and Config.IsAllowed(item, player.UserId) and data.Owned[id] - placedCount(data, id) > 0 then
+			sellOne(player, data, item)
+			syncStats(player)
+		end
 		return
 	end
 	local entry = Layout.CleanEntry(x, z, r, y)
