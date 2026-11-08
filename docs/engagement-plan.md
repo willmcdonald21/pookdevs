@@ -80,6 +80,7 @@ Pack and VIP items use the existing exclusive-item system:
    - **Stocker** (about 3,500 coins): when the oven is ready, moves the batch straight into cases with room. Your carried tray isn't used.
    - **Effect:** with both, the bakery runs on its own, while deliveries stay hands-on.
    - **Saved progress:** `BakerLevel` and `StockerLevel`. Higher levels work faster.
+   - **Replaced on 2026-11-07:** helpers became employees with jobs, looks and names, hired from an Employees button. See `employees-plan.md`.
 
 **Save data:** all new saved fields are added to `clean()` in `ServerScriptService.PlayerData` with safe defaults, so existing saves load without problems.
 
