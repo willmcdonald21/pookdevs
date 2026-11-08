@@ -1455,15 +1455,45 @@ groceryCounter:WaitForChild("Prompt").Triggered:Connect(function(player)
 	openPanelEvent:FireClient(player, "Grocery")
 end)
 
--- Buys a bundle, or as much of one as fits in the pantry at the same price per item.
-buyGroceriesEvent.OnServerEvent:Connect(function(player, id)
+-- Buys a bundle, or as much of one as fits in the pantry at the same price per item. how
+-- "Fill" buys all the room left for that ingredient. id "All" fills every ingredient, and
+-- how is then the total the player agreed to, so a bigger one is refused.
+buyGroceriesEvent.OnServerEvent:Connect(function(player, id, how)
 	local data = PlayerData.Get(player)
 	local ingredient = type(id) == "string" and Config.GetIngredient(id)
-	if not data or not ingredient then
+	if not data or not (ingredient or id == "All") then
 		return
 	end
 	if not isNear(player, groceryCounter.Position, GROCERY_REACH) then
 		notify(player, "Go to the grocery store counter to buy ingredients")
+		return
+	end
+	if id == "All" then
+		local spaces, count, total = {}, 0, 0
+		for _, each in Config.Ingredients do
+			local room = pantryCapacity(data) - data.Pantry[each.Id]
+			if room > 0 then
+				spaces[each.Id] = room
+				count += room
+				total += Config.GroceryPrice(each, room)
+			end
+		end
+		if count == 0 then
+			notify(player, "Your pantry is already full")
+			return
+		end
+		if type(how) ~= "number" or total > how then
+			notify(player, "Your pantry changed. Check the new total")
+			return
+		end
+		if not buy(player, data, total) then
+			return
+		end
+		for each, room in spaces do
+			data.Pantry[each] += room
+		end
+		syncStats(player)
+		notify(player, ("Filled your pantry: %d ingredients for %d coins"):format(count, total), "Coin")
 		return
 	end
 	local space = pantryCapacity(data) - data.Pantry[id]
@@ -1471,8 +1501,8 @@ buyGroceriesEvent.OnServerEvent:Connect(function(player, id)
 		notify(player, ("Your pantry has no room for more %s"):format(ingredient.Name))
 		return
 	end
-	local amount = math.min(Config.GroceryBundle, space)
-	local price = math.ceil(ingredient.BundlePrice * amount / Config.GroceryBundle)
+	local amount = how == "Fill" and space or math.min(Config.GroceryBundle, space)
+	local price = Config.GroceryPrice(ingredient, amount)
 	if not buy(player, data, price) then
 		return
 	end
