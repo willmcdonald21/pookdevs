@@ -898,6 +898,31 @@ function Config.GetPass(id)
 	return nil
 end
 
+-- Selling a piece gives back this share of its price, in the coins or Stars it costs.
+Config.SellShare = 0.5
+
+-- What one more copy of an item sells for, given how many are owned: the amount and
+-- "Coins" or "Stars", or nil and why it can't be sold. Gifts and anything that comes
+-- with a pass can't be sold, but extra pack copies bought with coins can.
+function Config.SellValue(item, owned)
+	if item.OnlyFor then
+		return nil, "It's a gift, so it can't be sold"
+	end
+	if item.Pass then
+		local pass = Config.GetPass(item.Pass)
+		if not item.ExtraCoins then
+			return nil, ("It comes with %s, so it can't be sold"):format(pass.Name)
+		elseif owned <= 1 then
+			return nil, ("The first one comes with the %s, so it can't be sold"):format(pass.Name)
+		end
+		return math.floor(item.ExtraCoins * Config.SellShare), "Coins"
+	end
+	if item.Stars then
+		return math.floor(item.Stars * Config.SellShare), "Stars"
+	end
+	return math.floor(item.Coins * Config.SellShare), "Coins"
+end
+
 -- Accounts that own some game passes for free, with the pass Ids each one gets.
 Config.FreePasses = {
 	[7358315834] = { "VIP", "StarterPack", "CozyPack", "WinterPack" }, -- lullabybbys
