@@ -4156,10 +4156,11 @@ local function setUpPlot(model)
 	setActive(plot.cookbookPrompt, false)
 	setActive(plot.pantryPrompt, false)
 	setActive(plot.packingPrompt, false)
-	-- Co-bakers can use the pantry shelf, the packing table and the register, but not the
-	-- cookbook counter.
+	-- Co-bakers can use the pantry shelf, the packing table and the register. At the
+	-- cookbook counter they see their own recipes and daily goals.
 	plot.pantryPrompt:SetAttribute("CoBake", true)
 	plot.packingPrompt:SetAttribute("CoBake", true)
+	plot.cookbookPrompt:SetAttribute("CoBake", true)
 	-- Customers pay when someone taps the register's prompt, or when a Cashier is there.
 	plot.registerPart = model.Checkout.Register.Body
 	local registerPrompt = Instance.new("ProximityPrompt")
