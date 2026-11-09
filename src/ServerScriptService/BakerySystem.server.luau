@@ -2062,7 +2062,7 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 			-- One message, since each new one replaces the last.
 			local text = ("%s is open! It's through the new door in your back wall"):format(Config.Stash.Name)
 			if #moved > 0 then
-				text = ("%s is open! To make room for its door, we moved the %s"):format(
+				text = ("%s is open! To make room, we moved the %s"):format(
 					Config.Stash.Name,
 					table.concat(moved, ", the ")
 				)
