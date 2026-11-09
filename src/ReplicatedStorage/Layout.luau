@@ -1,5 +1,5 @@
--- Placement rules for the grid on each bakery floor. The server checks every move with
--- these, and the client runs the same checks to colour the preview.
+-- Placement rules for the grid on each bakery floor and its garden. The server checks
+-- every move with these, and the client runs the same checks to colour the preview.
 -- Positions are in floor space: the floor's centre is the origin and the door is at +Z.
 -- A grid entry is { X, Z, R }. X and Z are the whole-number cell of the piece's corner
 -- with the lowest coordinates, and R is how many quarter turns it has been rotated.
@@ -62,19 +62,73 @@ function Layout.StashBounds(level)
 	return { MinX = stash.MinX, MaxX = stash.MaxX, MinZ = maxZ - stash.Depth, MaxZ = maxZ }
 end
 
--- Where an item can go: The Sweet Stash for an item with Room, or else the bakery.
-function Layout.BoundsFor(item, level)
-	return item.Room and Layout.StashBounds(level) or Layout.Bounds(level)
+-- The garden, the lawn around the outside of the bakery, once it's bought. It reaches Ring
+-- studs past the walls of the biggest bakery at the sides and back, and out to FrontZ in
+-- front. Its pieces stand on the lawn, LawnDrop studs (a plot attribute) below the floor.
+-- They can go anywhere in it except where Layout.GardenThings keeps clear: the bakery as
+-- big as it is now, The Sweet Stash, the path to the door, the ingredient crate's and flyer
+-- stand's spots, and the town around it: the plaza, the townsfolk's ways in and out of
+-- town, the grocery store and the neighbours' gardens. So a small bakery has a bigger yard,
+-- until it grows. FrontWall is the outside face of the front wall, and PathHalf is half the
+-- path's width, with a stud to spare each side. Spots are the crate and the flyer stand,
+-- Half studs each way from their middle. Reasons says why each kind of cell in the
+-- GardenMask is kept clear.
+Layout.Garden = {
+	Ring = 6,
+	FrontZ = 30,
+	FrontWall = 20,
+	PathHalf = 6,
+	Reasons = {
+		P = "Keep the plaza clear",
+		W = "Keep the townsfolk's path clear",
+		G = "Keep clear of the grocery store",
+		N = "That's your neighbour's garden",
+	},
+	Spots = {
+		{ Key = "Crate", X = 9, Z = 24, Half = 2.5, Reason = "Keep the ingredient crate's spot clear" },
+		{ Key = "Flyers", X = -9, Z = 24, Half = 2.5, Reason = "Keep the flyer stand's spot clear" },
+	},
+}
+
+function Layout.GardenBounds()
+	local largest, garden, wall = Layout.Largest, Layout.Garden, Layout.Stash.Wall
+	return {
+		MinX = largest.MinX - wall - garden.Ring,
+		MaxX = largest.MaxX + wall + garden.Ring,
+		MinZ = largest.MinZ - wall - garden.Ring,
+		MaxZ = garden.FrontZ,
+	}
 end
 
--- Saved and sent cells must fit in the biggest bakery or its stash.
+-- Where an item can go: The Sweet Stash or the garden for an item with that Room, or
+-- else the bakery.
+function Layout.BoundsFor(item, level)
+	if item.Room == "Stash" then
+		return Layout.StashBounds(level)
+	elseif item.Room == "Garden" then
+		return Layout.GardenBounds()
+	end
+	return Layout.Bounds(level)
+end
+
+-- Saved and sent cells must fit in the biggest bakery, its stash or its garden.
 local farthestStash = Layout.StashBounds(#Config.Expansions)
+local garden = Layout.GardenBounds()
 Layout.Farthest = {
-	MinX = math.min(Layout.Largest.MinX, farthestStash.MinX),
-	MaxX = math.max(Layout.Largest.MaxX, farthestStash.MaxX),
-	MinZ = farthestStash.MinZ,
-	MaxZ = Layout.Largest.MaxZ,
+	MinX = math.min(Layout.Largest.MinX, farthestStash.MinX, garden.MinX),
+	MaxX = math.max(Layout.Largest.MaxX, farthestStash.MaxX, garden.MaxX),
+	MinZ = math.min(farthestStash.MinZ, garden.MinZ),
+	MaxZ = math.max(Layout.Largest.MaxZ, garden.MaxZ),
 }
+
+-- The CFrame a piece's cells are measured from: the floor's top, or the lawn for a garden
+-- piece. plot is the bakery's model in the workspace.
+function Layout.TopFor(item, floorTop, plot)
+	if item.Room == "Garden" then
+		return floorTop * CFrame.new(0, -(plot:GetAttribute("LawnDrop") or 0), 0)
+	end
+	return floorTop
+end
 
 -- Just inside the door. Solid pieces can't go here, so customers can always get in.
 Layout.Entrance = { MinX = -7, MaxX = 7, MinZ = 15, MaxZ = 19 }
@@ -131,7 +185,8 @@ function Layout.ItemShape(item)
 		elseif spec.Kind == "Plate" then
 			halfX, halfZ, halfY = spec.Diameter / 2, spec.Height / 2, spec.Diameter / 2
 		elseif spec.Kind == "Ball" then
-			halfX, halfZ, halfY = spec.Diameter / 2, spec.Diameter / 2, spec.Diameter / 2
+			local size = spec.Size or Vector3.one * spec.Diameter
+			halfX, halfZ, halfY = size.X / 2, size.Z / 2, size.Y / 2
 		else
 			halfX, halfZ, halfY = spec.Size.X / 2, spec.Size.Z / 2, spec.Size.Y / 2
 		end
@@ -258,7 +313,7 @@ function Layout.WallEntryAt(shape, point, bounds)
 end
 
 -- Turns saved or sent values into an entry, or nil when they aren't whole numbers inside
--- the biggest bakery or its stash. y is only given for wall pieces.
+-- the biggest bakery, its stash or its garden. y is only given for wall pieces.
 function Layout.CleanEntry(x, z, r, y)
 	if type(x) ~= "number" or type(z) ~= "number" or type(r) ~= "number" then
 		return nil
@@ -354,6 +409,57 @@ function Layout.StashThings(level)
 	}
 end
 
+-- What garden pieces can't go on, as things for Check: the bakery at its size now, walls
+-- included, The Sweet Stash's room when stashBought, the path, the crate's and flyer
+-- stand's spots, and the town around the bakery (plot is its model). The server works out
+-- which cells of the garden the town needs, once, and stores them on the plot as the
+-- GardenMask attribute: runs of cells down each column, "x,minZ,maxZ,Kind;" with a Kind
+-- from Layout.Garden.Reasons, like W for the townsfolk's way in and out of town.
+function Layout.GardenThings(level, stashBought, plot)
+	local bounds, garden, wall = Layout.Bounds(level), Layout.Garden, Layout.Stash.Wall
+	local area = Layout.GardenBounds()
+	local function fixed(key, rect, reason)
+		return { Key = key, Name = key, Rect = rect, Bottom = -1, Height = 100, Reason = reason }
+	end
+	local things = {
+		fixed("Bakery", {
+			MinX = bounds.MinX - wall,
+			MaxX = bounds.MaxX + wall,
+			MinZ = bounds.MinZ - wall,
+			MaxZ = garden.FrontWall,
+		}, "Keep it out of your bakery"),
+		fixed("Path", {
+			MinX = -garden.PathHalf,
+			MaxX = garden.PathHalf,
+			MinZ = garden.FrontWall,
+			MaxZ = area.MaxZ,
+		}, "Keep the path clear for customers"),
+	}
+	for _, spot in garden.Spots do
+		table.insert(things, fixed(spot.Key, {
+			MinX = spot.X - spot.Half,
+			MaxX = spot.X + spot.Half,
+			MinZ = spot.Z - spot.Half,
+			MaxZ = spot.Z + spot.Half,
+		}, spot.Reason))
+	end
+	if stashBought then
+		local room = Layout.StashBounds(level)
+		table.insert(things, fixed("Stash", {
+			MinX = room.MinX - wall,
+			MaxX = room.MaxX + wall,
+			MinZ = room.MinZ - wall,
+			MaxZ = room.MaxZ,
+		}, ("Keep it off %s"):format(Config.Stash.Name)))
+	end
+	local mask = plot and plot:GetAttribute("GardenMask") or ""
+	for x, minZ, maxZ, kind in mask:gmatch("(%-?%d+),(%-?%d+),(%-?%d+),(%a)") do
+		local rect = { MinX = tonumber(x), MaxX = tonumber(x) + 1, MinZ = tonumber(minZ), MaxZ = tonumber(maxZ) }
+		table.insert(things, fixed(kind, rect, garden.Reasons[kind]))
+	end
+	return things
+end
+
 local function overlaps(a, b)
 	return a.MinX < b.MaxX and b.MinX < a.MaxX and a.MinZ < b.MaxZ and b.MinZ < a.MaxZ
 end
@@ -401,8 +507,10 @@ end
 function Layout.Check(thing, others, bounds)
 	bounds = bounds or Layout.Start
 	if not Layout.Inside(thing.Rect, bounds) then
-		if thing.Room then
+		if thing.Room == "Stash" then
 			return false, ("Put the %s in %s"):format(thing.Name:lower(), Config.Stash.Name)
+		elseif thing.Room == "Garden" then
+			return false, "Keep it in your garden"
 		end
 		return false, "Keep it inside your bakery"
 	end
@@ -412,7 +520,7 @@ function Layout.Check(thing, others, bounds)
 	if thing.Front and not Layout.Inside(thing.Front, bounds) then
 		return false, roomInFront(thing.Name)
 	end
-	if not thing.Flat and not thing.Wall and overlaps(thing.Rect, Layout.Entrance) then
+	if not thing.Flat and not thing.Wall and thing.Room ~= "Garden" and overlaps(thing.Rect, Layout.Entrance) then
 		return false, "Keep the doorway clear for customers"
 	end
 	for _, other in others do
