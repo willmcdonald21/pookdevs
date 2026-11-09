@@ -3342,16 +3342,18 @@ end
 
 -- Works out which cells of each bakery's garden the town needs, once setUpTown has found
 -- the townsfolk's ways, and stores them on the plot as its GardenMask (see
--- Layout.GardenThings). A cell is kept clear when it's on the plaza or its rim, within
--- WAY_HALF studs of a way in or out of town (as tools/build_greenery.luau keeps the park
--- clear), on the grocery store's lot, or in a neighbour's garden nearer their bakery.
+-- Layout.GardenThings). A cell is kept clear when it's on the plaza, its rim or the flower
+-- beds just outside the rim (PLAZA_EDGE studs past it), within WAY_HALF studs of a way in
+-- or out of town (as tools/build_greenery.luau keeps the park clear), on the grocery
+-- store's lot, or in a neighbour's garden nearer their bakery.
+exterior.PLAZA_EDGE = 5
 exterior.WAY_HALF = 7
 exterior.WAY_END = 185
 exterior.GROCERY_BOX = { MinX = -23, MaxX = 23, MinZ = -18, MaxZ = 22 }
 
 function exterior.setUpGardens()
 	local townModel = Workspace:WaitForChild("Town")
-	local plazaRadius = townModel.PlazaRim.Size.Y / 2 + 1
+	local plazaRadius = townModel.PlazaRim.Size.Y / 2 + exterior.PLAZA_EDGE
 	local center = town.center * Vector3.new(1, 0, 1)
 	local ways = {}
 	for _, edge in town.edges do
