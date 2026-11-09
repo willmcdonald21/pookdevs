@@ -66,6 +66,9 @@ local refreshEmployees
 -- its shelves, and which treat each display case is kept for. Its functions are defined
 -- further down, next to what they use.
 local stash = {}
+-- The outside of each bakery: its name on the sign, its outside wall and trim colours, and
+-- its garden. Its functions are defined further down, next to what they use.
+local exterior = {}
 -- Bake Together. coBakers maps each co-baker to the bakery they're working in, and
 -- lastAction to when they last did something there. friendPairs[a][b] is true when a and
 -- b are Roblox friends in this server.
@@ -679,11 +682,17 @@ local function stationEntries(plot, data)
 	return entries
 end
 
--- Every piece and station, and the stash's doorway and whiteboard once it's bought.
-local function layoutThings(plot, data)
+-- Every piece and station, and the stash's doorway and whiteboard once it's bought. For a
+-- garden piece (item), also what the garden keeps clear, like the bakery and the path.
+local function layoutThings(plot, data, item)
 	local things = Layout.AllThings(data.Placed, stationEntries(plot, data), plot.stationShapes)
 	if data.Stash then
 		for _, thing in Layout.StashThings(data.Expansion) do
+			table.insert(things, thing)
+		end
+	end
+	if item and item.Room == "Garden" then
+		for _, thing in exterior.things(plot, data) do
 			table.insert(things, thing)
 		end
 	end
@@ -817,6 +826,11 @@ local function syncStats(player, skipCoBakers)
 		Paint = data.Paint,
 		Floor = data.Floor,
 		SparePaint = data.SparePaint,
+		Exterior = data.Exterior,
+		Garden = data.Garden,
+		-- The name as typed, for the box the owner edits it in, and as the sign shows it.
+		BakeryName = data.BakeryName,
+		SignName = plot and plot.signLabel.Text or "",
 		Charm = totalCharm(data),
 		Orders = orders,
 		CanAfford = canAffordUpgrade(data),
@@ -1182,11 +1196,13 @@ end
 local function buildPlaced(plot, data, key)
 	local entry = data.Placed[key]
 	local item = Config.GetItem(entry.Id)
-	local origin = Layout.CFrame(plot.floorTop, Layout.ItemShape(item), entry)
+	local origin = Layout.CFrame(Layout.TopFor(item, plot.floorTop, plot.model), Layout.ItemShape(item), entry)
 	-- Wall pieces aren't solid, so nobody gets caught on them or stands on top of them.
+	-- Garden plants aren't either, like the park's, so they never block the townsfolk.
 	-- A painted display case is built in its colour.
 	local paint = entry.Paint and Config.GetPaint(entry.Paint)
-	local model = ItemBuilder.Build(item, 1, origin, not item.Flat and not item.Wall, paint and paint.Color)
+	local solid = not item.Flat and not item.Wall and item.Room ~= "Garden"
+	local model = ItemBuilder.Build(item, 1, origin, solid, paint and paint.Color)
 	ItemBuilder.Anchor(model)
 	model.Name = "Placed_" .. key
 	if item.Sparkles then
@@ -1457,7 +1473,7 @@ end
 -- wall, and its shelves and their treats go with it.
 function stash.moveShelves(plot, data, old, new)
 	for key, entry in data.Placed do
-		if Config.GetItem(entry.Id).Room then
+		if Config.GetItem(entry.Id).Room == "Stash" then
 			entry.Z -= old.MinZ - new.MinZ
 			unbuildPlaced(plot, key)
 			buildPlaced(plot, data, key)
@@ -1543,7 +1559,8 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 	local key, thing
 	if action == "New" then
 		local item = Config.GetItem(id)
-		if not item or placedCount(data, id) >= data.Owned[id] or (item.Room and not data.Stash) then
+		-- data.Stash or data.Garden is true once that Room is bought.
+		if not item or placedCount(data, id) >= data.Owned[id] or (item.Room and not data[item.Room]) then
 			return
 		end
 		entry.Id = id
@@ -1566,9 +1583,11 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 	if wall ~= (entry.Y ~= nil) then
 		return
 	end
-	-- Stash Shelves go in The Sweet Stash, and everything else in the bakery.
-	local bounds = key and Layout.BoundsFor(Config.GetItem(entry.Id), data.Expansion) or plotBounds(data)
-	local fits, reason = Layout.Check(thing, layoutThings(plot, data), bounds)
+	-- Stash Shelves go in The Sweet Stash, garden plants in the garden, and everything else
+	-- in the bakery.
+	local item = key and Config.GetItem(entry.Id)
+	local bounds = item and Layout.BoundsFor(item, data.Expansion) or plotBounds(data)
+	local fits, reason = Layout.Check(thing, layoutThings(plot, data, item), bounds)
 	if not fits then
 		notify(player, reason)
 		syncStats(player)
@@ -1722,10 +1741,255 @@ function floorTiles.buy(player, plot, data, style, keys, fill)
 	end
 end
 
+-- The outside of each bakery. The walls' outsides are thin skins over each wall, in
+-- plot.skinFolder, so the paint inside stays inside. The trim along the top of the walls
+-- and the sign board take the trim colour. The sign shows the bakery's name once Roblox
+-- has filtered it. The garden's pieces stand on the lawn, and GardenGround is an invisible
+-- part over the garden that the owner's taps land on while placing them.
+exterior.SKIN = 0.1
+exterior.nameEvent = remote("BakeryName")
+-- Which way each wall part's outside faces, in floor space. The Sweet Stash's room uses
+-- the same names for its walls.
+exterior.FACES = {
+	BackWall = -Vector3.zAxis,
+	BackWallRight = -Vector3.zAxis,
+	BackWallTop = -Vector3.zAxis,
+	LeftWall = -Vector3.xAxis,
+	RightWall = Vector3.xAxis,
+	FrontLeft = Vector3.zAxis,
+	FrontRight = Vector3.zAxis,
+}
+
+-- Remembers the colours the bakery was built in, and how far below the floor the lawn is.
+function exterior.setUp(plot)
+	local model = plot.model
+	plot.skinFolder = Instance.new("Folder")
+	plot.skinFolder.Name = "Exterior"
+	plot.skinFolder.Parent = model
+	plot.outsideColor = model.Walls.BackWall.Color
+	-- The sign board and the two posts it stands on take the trim colour too.
+	plot.trimParts = { [model.Sign] = model.Sign.Color, [model.PostLeft] = model.PostLeft.Color, [model.PostRight] = model.PostRight.Color }
+	for _, part in model.Walls:GetChildren() do
+		if part.Name:sub(1, 4) == "Trim" then
+			plot.trimParts[part] = part.Color
+		end
+	end
+	plot.signColors = { Text = plot.signLabel.TextColor3, Back = plot.signLabel.BackgroundColor3 }
+	plot.nextRename = 0
+	local baseplate = Workspace:WaitForChild("Baseplate")
+	model:SetAttribute("LawnDrop", plot.floorTop.Position.Y - (baseplate.Position.Y + baseplate.Size.Y / 2))
+end
+
+-- A skin over the outside of a wall part, facing face. A back wall's skin leaves out the
+-- stretch from skip[1] to skip[2] across, inside The Sweet Stash's room.
+function exterior.skin(plot, part, face, color, skip)
+	local frame = plot.floorTop:ToObjectSpace(part.CFrame)
+	local size, center, thickness = part.Size, frame.Position, exterior.SKIN
+	-- The part's half size along each floor axis, however it's turned.
+	local function across(axis)
+		return (math.abs(frame.XVector[axis]) * size.X + math.abs(frame.YVector[axis]) * size.Y + math.abs(frame.ZVector[axis]) * size.Z) / 2
+	end
+	local half = Vector3.new(across("X"), across("Y"), across("Z"))
+	local pieces = {}
+	if face.Z ~= 0 then
+		local minX, maxX = center.X - half.X - thickness, center.X + half.X + thickness
+		local spans = { { minX, maxX } }
+		if skip then
+			spans = {}
+			if minX < skip[1] then
+				table.insert(spans, { minX, math.min(maxX, skip[1]) })
+			end
+			if maxX > skip[2] then
+				table.insert(spans, { math.max(minX, skip[2]), maxX })
+			end
+		end
+		for _, span in spans do
+			table.insert(pieces, {
+				Vector3.new(span[2] - span[1], half.Y * 2, thickness),
+				Vector3.new((span[1] + span[2]) / 2, center.Y, center.Z + face.Z * (half.Z + thickness / 2)),
+			})
+		end
+	else
+		table.insert(pieces, {
+			Vector3.new(thickness, half.Y * 2, half.Z * 2 + 2 * thickness),
+			Vector3.new(center.X + face.X * (half.X + thickness / 2), center.Y, center.Z),
+		})
+	end
+	for _, piece in pieces do
+		local skin = Instance.new("Part")
+		skin.Name = part.Name .. "Outside"
+		skin.Anchored = true
+		skin.CanCollide = false
+		skin.CanQuery = false
+		skin.CanTouch = false
+		skin.CastShadow = false
+		skin.Material = part.Material
+		skin.Color = color
+		skin.Size = piece[1]
+		skin.CFrame = plot.floorTop * CFrame.new(piece[2])
+		skin.Parent = plot.skinFolder
+	end
+end
+
+-- Paints the outside in the owner's colours, or the colours it was built in when data is
+-- nil. Run after applyExpansion and stash.place, which move and cut the walls.
+function exterior.apply(plot, data)
+	plot.skinFolder:ClearAllChildren()
+	local look = data and data.Exterior or {}
+	local primary, secondary = Config.GetPaint(look.Primary), Config.GetPaint(look.Secondary)
+	for part, original in plot.trimParts do
+		part.Color = secondary and secondary.Color or original
+	end
+	-- Dark writing on a pale board and white writing on a dark one.
+	local label = plot.signLabel
+	if label.BackgroundTransparency < 1 then
+		label.BackgroundColor3 = secondary and secondary.Color or plot.signColors.Back
+	end
+	local board = secondary and secondary.Color
+	local pale = board and (0.299 * board.R + 0.587 * board.G + 0.114 * board.B) > 0.6
+	label.TextColor3 = not board and plot.signColors.Text or pale and Color3.fromRGB(90, 60, 70) or Color3.new(1, 1, 1)
+	if not data then
+		return
+	end
+	local color = primary and primary.Color or plot.outsideColor
+	local skip = data.Stash and { Layout.Stash.MinX, Layout.Stash.MaxX } or nil
+	for _, part in plot.model.Walls:GetChildren() do
+		local face = exterior.FACES[part.Name]
+		if face then
+			exterior.skin(plot, part, face, color, face.Z < 0 and skip or nil)
+		end
+	end
+	if plot.stashRoom then
+		for _, part in plot.stashRoom.Walls:GetChildren() do
+			local face = exterior.FACES[part.Name]
+			if face then
+				exterior.skin(plot, part, face, color)
+			else
+				part.Color = secondary and secondary.Color or ServerStorage.StashRoom.Walls[part.Name].Color
+			end
+		end
+	end
+end
+
+-- Shows the bakery's name on its sign: "<DisplayName>'s Bakery" until the owner's own name
+-- for it has been filtered, or "Empty Bakery" with no owner.
+function exterior.showName(plot)
+	local owner = plot.owner
+	local data = owner and PlayerData.Get(owner)
+	local token = {}
+	plot.nameToken = token
+	plot.signLabel.Text = owner and owner.DisplayName .. "'s Bakery" or "Empty Bakery"
+	local raw = data and data.BakeryName
+	if not raw then
+		return
+	end
+	task.spawn(function()
+		local ok, shown = pcall(function()
+			return game:GetService("TextService")
+				:FilterStringAsync(raw, owner.UserId, Enum.TextFilterContext.PublicChat)
+				:GetNonChatStringForBroadcastAsync()
+		end)
+		if not ok then
+			warn("BakerySystem: could not filter a bakery's name: " .. tostring(shown))
+		end
+		if plot.nameToken ~= token or plot.owner ~= owner or not ok then
+			return
+		end
+		plot.signLabel.Text = shown
+		syncStats(owner)
+	end)
+end
+
+-- What garden pieces must keep off, at the bakery's size now.
+function exterior.things(plot, data)
+	return Layout.GardenThings(data.Expansion, data.Stash, plot.model)
+end
+
+-- Lays the invisible GardenGround over the garden once it's bought, or takes it away.
+function exterior.ground(plot, data)
+	local old = plot.model:FindFirstChild("GardenGround")
+	if old then
+		old:Destroy()
+	end
+	if not (data and data.Garden) then
+		return
+	end
+	local area = Layout.GardenBounds()
+	local part = Instance.new("Part")
+	part.Name = "GardenGround"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Transparency = 1
+	part.Size = Vector3.new(area.MaxX - area.MinX, 0.2, area.MaxZ - area.MinZ)
+	part.CFrame = plot.floorTop * CFrame.new(Layout.Center(area) - Vector3.new(0, plot.model:GetAttribute("LawnDrop") + 0.1, 0))
+	part.Parent = plot.model
+end
+
+-- Puts garden plants that the bakery or its stash now covers in the inventory, after the
+-- bakery grows or the stash is bought. Returns their names.
+function exterior.clearGarden(plot, data)
+	local moved = {}
+	local things, area = exterior.things(plot, data), Layout.GardenBounds()
+	for key, entry in data.Placed do
+		local item = Config.GetItem(entry.Id)
+		if item.Room == "Garden" and not Layout.Check(Layout.ItemThing(key, entry), things, area) then
+			storePlaced(plot, data, key)
+			table.insert(moved, item.Name)
+		end
+	end
+	return moved
+end
+
+-- Paints a Config.Exterior part (partId) a colour, or back to its own colour for free
+-- when paintId is "Original".
+function exterior.paint(player, plot, data, partId, paintId)
+	local part = Config.GetExteriorPart(partId)
+	local paint = Config.GetPaint(paintId)
+	if not part or not (paint or paintId == "Original") then
+		return
+	end
+	if (paint and paint.Id) == data.Exterior[part.Id] then
+		notify(player, paint and ("It's already %s"):format(paint.Name) or "It's already its original colour")
+		return
+	end
+	if paint and not buy(player, data, part.Coins) then
+		return
+	end
+	data.Exterior[part.Id] = paint and paint.Id or nil
+	exterior.apply(plot, data)
+	syncStats(player)
+	notify(player, ("%s: %s!"):format(part.Name, paint and paint.Name or "back to the original colour"), "Coin")
+end
+
+-- The owner renames their bakery. An empty name goes back to "<DisplayName>'s Bakery".
+exterior.nameEvent.OnServerEvent:Connect(function(player, raw)
+	local plot = playerPlots[player]
+	local data = PlayerData.Get(player)
+	if not plot or not data or type(raw) ~= "string" then
+		return
+	end
+	if os.clock() < plot.nextRename then
+		notify(player, "Wait a moment before renaming it again")
+		syncStats(player)
+		return
+	end
+	local name = PlayerData.CleanName(raw, Config.Exterior.NameLength)
+	if name == data.BakeryName then
+		return
+	end
+	plot.nextRename = os.clock() + Config.Exterior.RenameSeconds
+	data.BakeryName = name
+	exterior.showName(plot)
+	syncStats(player)
+end)
+
 -- "Item" takes an item's Id and, for a paintable piece, the paint Id picked for it.
 -- "Paint" takes a paint target's Id and a paint Id, and "PaintCase" a placed paintable
 -- piece's key and a paint Id. "Floor" takes a floor style's Id and a list of tile keys,
--- and "FloorFill" a floor style's Id.
+-- and "FloorFill" a floor style's Id. "Exterior" takes a Config.Exterior part's Id and a
+-- paint Id, or "Original", and "Garden" buys the garden.
 purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 	local data = PlayerData.Get(player)
 	local plot = playerPlots[player]
@@ -1757,11 +2021,12 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 		if not item or item.OnlyFor then
 			return
 		end
-		-- Only a pass's owners can buy more of its items, and Stash Shelves need the stash.
+		-- Only a pass's owners can buy more of its items. Stash Shelves need the stash, and
+		-- garden plants the garden.
 		if item.Pass and not (item.ExtraCoins and PurchaseHandler.OwnsPass(player, item.Pass)) then
 			return
 		end
-		if item.Room and not data.Stash then
+		if item.Room and not data[item.Room] then
 			return
 		end
 		local paid
@@ -1777,7 +2042,7 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 			-- A paintable piece comes in the colour picked when buying it.
 			sparePaint.push(data, item, extra)
 			syncStats(player)
-			local where = item.Room and Config.Stash.Name or "your bakery"
+			local where = item.Room == "Stash" and Config.Stash.Name or item.Room == "Garden" and "your garden" or "your bakery"
 			notify(player, ("%s bought! Press Place to put it in %s"):format(item.Name, where), "Coin")
 		end
 	elseif kind == "Stash" and not data.Stash then
@@ -1785,8 +2050,13 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 			data.Stash = true
 			local moved = stash.clearDoorway(plot, data)
 			stash.place(plot, data)
-			-- The new pieces of back wall take its paint.
+			-- Garden plants where the room now stands go to the inventory.
+			for _, name in exterior.clearGarden(plot, data) do
+				table.insert(moved, name .. " to your Inventory")
+			end
+			-- The new pieces of back wall take its paint, and the room the outside colours.
 			applyPaint(plot, data)
+			exterior.apply(plot, data)
 			refreshEmployees(plot, data)
 			syncStats(player)
 			-- One message, since each new one replaces the last.
@@ -1823,9 +2093,15 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 			moveWallPieces(plot, data, old, plotBounds(data))
 			stash.moveShelves(plot, data, old, plotBounds(data))
 			stash.place(plot, data)
+			local moved = exterior.clearGarden(plot, data)
+			exterior.apply(plot, data)
 			floorTiles.build(plot, data)
 			syncStats(player)
-			notify(player, "Your bakery is bigger! Decorate the new space", "Coin")
+			if #moved > 0 then
+				notify(player, ("Your bakery is bigger! The %s went to your Inventory to make room"):format(table.concat(moved, ", the ")), "Coin")
+			else
+				notify(player, "Your bakery is bigger! Decorate the new space", "Coin")
+			end
 		end
 	elseif kind == "Buzz" then
 		if buyWithStars(player, data, Config.Buzz.Stars) then
@@ -1874,6 +2150,15 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 			end
 			syncStats(player)
 			notify(player, ("%s painted %s!"):format(name, paint.Name), "Coin")
+		end
+	elseif kind == "Exterior" then
+		exterior.paint(player, plot, data, id, extra)
+	elseif kind == "Garden" and not data.Garden then
+		if buy(player, data, Config.Garden.Coins) then
+			data.Garden = true
+			exterior.ground(plot, data)
+			syncStats(player)
+			notify(player, "Your garden is ready! Buy plants for it at your sign", "Coin")
 		end
 	end
 end)
@@ -3055,6 +3340,70 @@ local function setUpTown()
 	end
 end
 
+-- Works out which cells of each bakery's garden the town needs, once setUpTown has found
+-- the townsfolk's ways, and stores them on the plot as its GardenMask (see
+-- Layout.GardenThings). A cell is kept clear when it's on the plaza or its rim, within
+-- WAY_HALF studs of a way in or out of town (as tools/build_greenery.luau keeps the park
+-- clear), on the grocery store's lot, or in a neighbour's garden nearer their bakery.
+exterior.WAY_HALF = 7
+exterior.WAY_END = 185
+exterior.GROCERY_BOX = { MinX = -23, MaxX = 23, MinZ = -18, MaxZ = 22 }
+
+function exterior.setUpGardens()
+	local townModel = Workspace:WaitForChild("Town")
+	local plazaRadius = townModel.PlazaRim.Size.Y / 2 + 1
+	local center = town.center * Vector3.new(1, 0, 1)
+	local ways = {}
+	for _, edge in town.edges do
+		table.insert(ways, ((edge - town.center) * Vector3.new(1, 0, 1)).Unit)
+	end
+	local grocery = Workspace:FindFirstChild("GroceryStore")
+	local area = Layout.GardenBounds()
+	local function inside(frame, box, point)
+		local spot = frame:PointToObjectSpace(point)
+		return spot.X > box.MinX and spot.X < box.MaxX and spot.Z > box.MinZ and spot.Z < box.MaxZ
+	end
+	local function kindAt(plot, point)
+		local flat = point * Vector3.new(1, 0, 1)
+		local fromCenter = flat - center
+		if fromCenter.Magnitude < plazaRadius then
+			return "P"
+		end
+		for _, way in ways do
+			local along = fromCenter:Dot(way)
+			if along > 0 and along < exterior.WAY_END and (fromCenter - way * along).Magnitude < exterior.WAY_HALF then
+				return "W"
+			end
+		end
+		if grocery and inside(grocery.Floor.CFrame, exterior.GROCERY_BOX, point) then
+			return "G"
+		end
+		local mine = flatDistance(point, plot.model.Floor.Position)
+		for _, other in plots do
+			if other ~= plot and inside(other.floorTop, area, point) and flatDistance(point, other.model.Floor.Position) < mine then
+				return "N"
+			end
+		end
+		return nil
+	end
+	for _, plot in plots do
+		local runs = {}
+		for x = area.MinX, area.MaxX - 1 do
+			local kind, start = nil, nil
+			for z = area.MinZ, area.MaxZ do
+				local here = z < area.MaxZ and kindAt(plot, plot.floorTop * Vector3.new(x + 0.5, 0, z + 0.5)) or nil
+				if here ~= kind then
+					if kind then
+						table.insert(runs, ("%d,%d,%d,%s;"):format(x, start, z, kind))
+					end
+					kind, start = here, z
+				end
+			end
+		end
+		plot.model:SetAttribute("GardenMask", table.concat(runs))
+	end
+end
+
 -- The average gap between customers without boosts. Charm shortens it, by less for each
 -- piece, up to CharmSpeed.Max.
 local function customerInterval(data)
@@ -4229,8 +4578,8 @@ local function claimPlot(player)
 			plot.ownerId = player.UserId
 			plot.session += 1
 			plot.model:SetAttribute("OwnerId", player.UserId)
-			plot.signLabel.Text = player.DisplayName .. "'s Bakery"
 			playerPlots[player] = plot
+			exterior.showName(plot)
 			for _, oven in plot.ovens do
 				resetOven(oven)
 				setActive(oven.prompt, true)
@@ -4241,6 +4590,8 @@ local function claimPlot(player)
 			applyExpansion(plot, data.Expansion)
 			stash.place(plot, data)
 			applyPaint(plot, data)
+			exterior.apply(plot, data)
+			exterior.ground(plot, data)
 			floorTiles.build(plot, data)
 			showBoughtStations(plot, data)
 			placeStations(plot, data)
@@ -4277,7 +4628,8 @@ local function releasePlot(player)
 	plot.ownerId = nil
 	plot.session += 1
 	plot.model:SetAttribute("OwnerId", nil)
-	plot.signLabel.Text = "Empty Bakery"
+	exterior.showName(plot)
+	plot.nextRename = 0
 	for _, oven in plot.ovens do
 		resetOven(oven)
 		setActive(oven.prompt, false)
@@ -4310,6 +4662,8 @@ local function releasePlot(player)
 	applyExpansion(plot, 0)
 	stash.place(plot, nil)
 	applyPaint(plot, nil)
+	exterior.apply(plot, nil)
+	exterior.ground(plot, nil)
 	floorTiles.build(plot, nil)
 	removeCrate(plot)
 	showSaleBanner(plot, false)
@@ -4796,6 +5150,7 @@ local function setUpPlot(model)
 		end
 		plot.paintParts[target.Id] = parts
 	end
+	exterior.setUp(plot)
 	for _, station in Layout.Stations do
 		setUpStation(plot, station)
 	end
@@ -4860,6 +5215,7 @@ end)
 
 -- The plaza starts with people already strolling, then more walk in from the edges.
 setUpTown()
+exterior.setUpGardens()
 for _ = 1, Config.Townsfolk.Base do
 	spawnPerson(town.strolls[math.random(#town.strolls)].Position)
 end
