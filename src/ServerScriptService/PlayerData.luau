@@ -120,9 +120,22 @@ local function cleanFloor(saved)
 	return floor
 end
 
+-- The outside colours, as paint Ids by Config.Exterior part Id. A part with none is the
+-- colour the bakery was built in.
+local function cleanExterior(saved)
+	local exterior = {}
+	if type(saved) == "table" then
+		for _, part in Config.Exterior.Parts do
+			local chosen = Config.GetPaint(saved[part.Id])
+			exterior[part.Id] = chosen and chosen.Id or nil
+		end
+	end
+	return exterior
+end
+
 -- Keeps placed items that are owned and inside the walls, and moved stations. Wall items
--- keep their height and must still be on a wall, and Stash Shelves must be in The Sweet
--- Stash. Overlaps were checked when each piece was placed.
+-- keep their height and must still be on a wall, Stash Shelves must be in The Sweet Stash,
+-- and garden plants in the garden. Overlaps were checked when each piece was placed.
 local function cleanLayout(data, savedPlaced, savedStock, savedStations)
 	local bounds = Layout.Bounds(data.Expansion)
 	local placedCounts = {}
@@ -140,7 +153,9 @@ local function cleanLayout(data, savedPlaced, savedStock, savedStations)
 				entry.Treat = treat
 			end
 			local fits = Layout.Inside(Layout.Rect(Layout.ItemShape(item), entry), Layout.BoundsFor(item, data.Expansion))
-			if item.Room and not data.Stash then
+			-- A Room is The Sweet Stash or the garden, and data.Stash or data.Garden is true
+			-- once it's bought.
+			if item.Room and not data[item.Room] then
 				fits = false
 			end
 			if item.Wall then
@@ -232,15 +247,16 @@ local function firstFreeJob(employees)
 	return ""
 end
 
--- A name with its spaces tidied, cut to Config.Employees.NameLength characters, or nil
--- when there's nothing left.
-local function cleanName(value)
+-- A name with its spaces tidied, cut to length characters (Config.Employees.NameLength
+-- unless given), or nil when there's nothing left.
+local function cleanName(value, length)
+	length = length or Config.Employees.NameLength
 	if type(value) ~= "string" or not utf8.len(value) then
 		return nil
 	end
 	local name = value:gsub("%s+", " "):match("^ ?(.-) ?$")
-	if utf8.len(name) > Config.Employees.NameLength then
-		name = name:sub(1, utf8.offset(name, Config.Employees.NameLength + 1) - 1)
+	if utf8.len(name) > length then
+		name = name:sub(1, utf8.offset(name, length + 1) - 1)
 	end
 	return name ~= "" and name or nil
 end
@@ -340,6 +356,13 @@ local function clean(saved)
 		-- How many times the bakery has been made bigger. 0 is the starting size.
 		Expansion = math.clamp(math.floor(tonumber(saved.Expansion) or 0), 0, #Config.Expansions),
 		Paint = cleanPaint(saved.Paint),
+		-- The outside colours. See Config.Exterior.
+		Exterior = cleanExterior(saved.Exterior),
+		-- The bakery's name as its owner typed it, or nil for "<DisplayName>'s Bakery". It's
+		-- filtered before anyone sees it on the sign.
+		BakeryName = cleanName(saved.BakeryName, Config.Exterior.NameLength),
+		-- True once the garden around the bakery has been bought.
+		Garden = saved.Garden == true,
 		-- Floor style Ids by tile key. See Layout.TileSize.
 		Floor = cleanFloor(saved.Floor),
 		-- 0 until the first save, so a 0 here means this is the player's first visit.
