@@ -1046,6 +1046,9 @@ local function expansionRows()
 			#Config.Expansions,
 			sizeText(Layout.Bounds(level + 1))
 		)
+		if state.Garden then
+			detail ..= ". Garden plants in the way go to your Inventory"
+		end
 		addRow("Bigger Bakery", detail, {
 			{
 				Text = withCommas(step.Coins) .. " coins",
@@ -2381,13 +2384,15 @@ refreshHotbarVisible = function()
 	moveSwitch.Visible = show
 end
 
-local function floorTop(plot)
+-- The floor's top, or the lawn's for a garden piece (item).
+local function floorTop(plot, item)
 	local floor = plot.Floor
-	return floor.CFrame * CFrame.new(0, floor.Size.Y / 2, 0)
+	local top = floor.CFrame * CFrame.new(0, floor.Size.Y / 2, 0)
+	return item and Layout.TopFor(item, top, plot) or top
 end
 
 -- Your bakery's floor inside the walls, which grows when you expand it, or The Sweet
--- Stash's floor while a Stash Shelf is held.
+-- Stash's floor while a Stash Shelf is held, or the garden while a garden plant is.
 local function myBounds()
 	local item = held and held.itemId and Config.GetItem(held.itemId)
 	return item and Layout.BoundsFor(item, state.Expansion) or Layout.Bounds(state.Expansion)
@@ -2433,10 +2438,11 @@ local gridLevel = nil
 -- The lines sit just above any floor tiles. While laying tiles, they mark the tiles'
 -- edges instead of every stud, and the doorway isn't tinted.
 local function showGrid(plot)
-	local top = floorTop(plot)
+	local item = held and held.itemId and Config.GetItem(held.itemId)
+	local top = floorTop(plot, item)
 	local bounds = myBounds()
 	gridLevel = state.Expansion
-	stash.gridRoom = bounds.MaxZ < Layout.Bounds(state.Expansion).MinZ
+	stash.gridRoom = item and item.Room or false
 	grid = Instance.new("Folder")
 	grid.Name = "DecorGrid"
 	-- Customize mode has nothing to place, so no grid.
@@ -2477,6 +2483,17 @@ local function showGrid(plot)
 		if state.Stash then
 			for _, fixed in Layout.StashThings(state.Expansion) do
 				table.insert(clear, fixed.Rect)
+			end
+		end
+		-- In the garden, everything it keeps clear: the path, the crate's and flyer stand's
+		-- spots, the townsfolk's way and the neighbours' gardens. The bakery, the stash and
+		-- the plaza (P) are clear to see already.
+		if stash.gridRoom == "Garden" then
+			clear = {}
+			for _, fixed in Layout.GardenThings(state.Expansion, state.Stash, plot) do
+				if fixed.Key ~= "Bakery" and fixed.Key ~= "P" and fixed.Key ~= "Stash" then
+					table.insert(clear, fixed.Rect)
+				end
 			end
 		end
 		for _, rect in clear do
@@ -2641,12 +2658,19 @@ local function refreshHeld()
 	if not held or not plot then
 		return
 	end
-	local top = floorTop(plot)
+	local item = held.itemId and Config.GetItem(held.itemId)
+	local garden = item ~= nil and item.Room == "Garden"
+	local top = floorTop(plot, item)
 	held.ghost:PivotTo(Layout.CFrame(top, held.shape, held.entry) * held.base)
 	local thing = heldThing()
 	local others = allThings(plot)
 	if state.Stash then
 		for _, fixed in Layout.StashThings(state.Expansion) do
+			table.insert(others, fixed)
+		end
+	end
+	if garden then
+		for _, fixed in Layout.GardenThings(state.Expansion, state.Stash, plot) do
 			table.insert(others, fixed)
 		end
 	end
@@ -2657,7 +2681,7 @@ local function refreshHeld()
 	ghostHighlight.FillColor = color
 	ghostHighlight.OutlineColor = color
 	local action = held.key and "Moving" or "Placing"
-	local surface = held.wall and "a wall" or "the floor"
+	local surface = held.wall and "a wall" or garden and "the lawn" or "the floor"
 	placeBanner.Text = ok and ("%s %s: tap or click %s to move it"):format(action, held.name, surface) or reason
 	placeBanner.BackgroundColor3 = ok and GREEN or BLOCKED_COLOR
 	barButtons.Place.BackgroundColor3 = ok and GREEN or GREY
@@ -2733,8 +2757,27 @@ local function holdItem(itemId, key)
 		local spot = pointInFront(plot)
 		entry = Layout.WallEntryAt(shape, Vector3.new(spot.X, WALL_START_HEIGHT, spot.Z), myBounds())
 	else
-		-- A Stash Shelf starts in The Sweet Stash, nearest the spot in front of you.
-		entry = Layout.EntryAt(shape, pointInFront(plot), 0, Layout.BoundsFor(item, state.Expansion))
+		-- A Stash Shelf starts in The Sweet Stash, nearest the spot in front of you, and a
+		-- garden plant in the garden. If that spot's taken, the plant starts at the first
+		-- free one in the front yard, from the left.
+		local bounds = Layout.BoundsFor(item, state.Expansion)
+		entry = Layout.EntryAt(shape, pointInFront(plot), 0, bounds)
+		if item.Room == "Garden" then
+			local others = allThings(plot)
+			for _, fixed in Layout.GardenThings(state.Expansion, state.Stash, plot) do
+				table.insert(others, fixed)
+			end
+			local function fits(spot)
+				return (Layout.Check(Layout.ItemThing("new", { Id = itemId, X = spot.X, Z = spot.Z, R = 0 }), others, bounds))
+			end
+			local found = fits(entry) and entry
+			for z = Layout.Garden.FrontWall - Layout.MinZ, bounds.MaxZ - Layout.MinZ - 1 do
+				for x = bounds.MinX - Layout.MinX, bounds.MaxX - Layout.MinX - 1 do
+					found = found or (fits({ X = x, Z = z }) and { X = x, Z = z, R = 0 })
+				end
+			end
+			entry = found or entry
+		end
 	end
 	-- A new piece shows the colour it will be: the newest one bought or put away for it.
 	if not key then
@@ -2869,6 +2912,11 @@ local function surfacePointAt(plot, ray)
 			table.insert(surfaces, plot.Walls:FindFirstChild(name))
 		end
 	end
+	-- A garden plant follows the lawn, under the bakery too, so it never lands on the floor.
+	local item = held and held.itemId and Config.GetItem(held.itemId)
+	if item and item.Room == "Garden" then
+		surfaces = { plot:FindFirstChild("GardenGround") }
+	end
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
 	params.FilterDescendantsInstances = surfaces
@@ -2975,10 +3023,13 @@ local function pieceOnRay(plot, ray)
 	local origin = top:PointToObjectSpace(ray.Origin)
 	local direction = top:VectorToObjectSpace(ray.Direction)
 	local nearest, nearestDistance = nil, math.huge
+	-- Garden plants stand on the lawn, below the floor.
+	local drop = plot:GetAttribute("LawnDrop") or 0
 	for _, thing in allThings(plot) do
 		local rect = thing.Rect
-		local low = Vector3.new(rect.MinX, thing.Bottom, rect.MinZ)
-		local high = Vector3.new(rect.MaxX, thing.Bottom + thing.Height, rect.MaxZ)
+		local bottom = thing.Bottom - (thing.Room == "Garden" and drop or 0)
+		local low = Vector3.new(rect.MinX, bottom, rect.MinZ)
+		local high = Vector3.new(rect.MaxX, bottom + thing.Height, rect.MaxZ)
 		local enter, exit = 0, math.huge
 		for _, axis in { "X", "Y", "Z" } do
 			local start, step = origin[axis], direction[axis]
@@ -3181,10 +3232,12 @@ function stash.pick(plot, ray)
 	end
 end
 
--- Draws the grid again when the held piece goes between the bakery and the stash.
+-- Draws the grid again when the held piece goes between the bakery, the stash and the
+-- garden. gridRoom is the Room the grid is drawn in, or false for the bakery.
 function stash.regrid()
 	local plot = myPlot()
-	local room = myBounds().MaxZ < Layout.Bounds(state.Expansion).MinZ
+	local item = held and held.itemId and Config.GetItem(held.itemId)
+	local room = item and item.Room or false
 	if grid and plot and room ~= stash.gridRoom then
 		grid:Destroy()
 		showGrid(plot)
@@ -3386,6 +3439,47 @@ local function refreshDecorating()
 	-- A case's treat may have changed.
 	stash.refreshTags()
 end
+
+-- The popup that opens when you tap your own bakery's sign: its name, its outside colours
+-- and its garden. It's a separate module because this script is at Luau's limit of 200
+-- local variables, so it's given what it needs here rather than as new locals.
+panels.Exterior = require(script.Parent:WaitForChild("ExteriorPanel"))({
+	player = player,
+	gui = gui,
+	panel = panel,
+	panelTitle = panelTitle,
+	colours = { PINK = PINK, BROWN = BROWN, CREAM = CREAM, GREEN = GREEN, GREY = GREY, GOLD = GOLD, BLUE = BLUE, WHITE = WHITE },
+	font = FONT,
+	label = label,
+	button = button,
+	addRow = addRow,
+	showTabs = showTabs,
+	textOn = textOn,
+	withCommas = withCommas,
+	starText = starText,
+	placedCount = placedCount,
+	isMine = isMine,
+	myPlot = myPlot,
+	setPanel = function(name)
+		setPanel(name)
+	end,
+	refreshPanel = function()
+		refreshPanel()
+	end,
+	startPlacing = function(itemId)
+		startPlacing(itemId)
+	end,
+	getState = function()
+		return state
+	end,
+	currentPanel = function()
+		return currentPanel
+	end,
+	isDecorating = function()
+		return decorating
+	end,
+	purchaseEvent = purchaseEvent,
+})
 
 local SLOT_KEYS = { Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four, Enum.KeyCode.Five }
 
