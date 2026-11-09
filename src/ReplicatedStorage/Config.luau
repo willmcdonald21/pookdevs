@@ -879,6 +879,214 @@ Config.Items = {
 	},
 }
 
+-- Garden plants. An item with Room = "Garden" stands on the lawn around the bakery once its
+-- owner has bought the garden (Config.Garden), and nowhere else. They're sold in the popup
+-- that opens when the owner taps their bakery's sign, not in the Decorate menu. They're
+-- fixed copies of the park's plants in tools/build_greenery.luau, in the same colours.
+-- Plants bought with Stars are the deluxe ones, and bring the most Charm.
+local BARK = rgb(125, 88, 64)
+local CHERRY_BARK = rgb(105, 72, 62)
+local LEAVES = { rgb(104, 178, 98), rgb(88, 160, 90), rgb(132, 196, 112) }
+local BLOSSOMS = { rgb(255, 168, 200), rgb(255, 140, 182), rgb(255, 200, 222) }
+local FLOWERS = { rgb(255, 168, 198), rgb(255, 250, 244), rgb(255, 226, 122), rgb(200, 172, 240), rgb(255, 150, 140) }
+local BED = rgb(78, 148, 82)
+local TERRACOTTA = rgb(206, 122, 92)
+local LEAFY = Enum.Material.LeafyGrass
+
+-- A flower head, a flattened ball, at x, y, z in one of the FLOWERS colours.
+local function flower(x, y, z, size, colour)
+	return { Kind = "Ball", Size = Vector3.new(size, size * 0.55, size), X = x, Y = y, Z = z, Color = colour }
+end
+
+local function leafBall(x, y, z, size, colour, squash)
+	return { Kind = "Ball", Size = Vector3.new(size, size * (squash or 0.85), size), X = x, Y = y, Z = z, Color = colour, Material = LEAFY }
+end
+
+-- Three leafy balls, the park's bush. With blooms, flowers dot the top of the leaves.
+local function bushParts(blooms)
+	local parts = {
+		leafBall(-0.9, 1.1, 0, 2.8, LEAVES[1]),
+		leafBall(0.9, 1.2, 0.2, 3.1, LEAVES[2]),
+		leafBall(0, 1.85, -0.3, 2.6, LEAVES[3]),
+	}
+	if blooms then
+		for index, spot in {
+			{ -1.5, 2.0, -0.6 },
+			{ -0.4, 2.85, -0.9 },
+			{ 0.6, 2.9, 0.2 },
+			{ 1.7, 2.2, -0.5 },
+			{ -0.9, 2.3, 0.9 },
+			{ 1.2, 2.45, 1.0 },
+		} do
+			table.insert(parts, flower(spot[1], spot[2], spot[3], 0.6, FLOWERS[index % 2 == 0 and 2 or 1]))
+		end
+	end
+	return parts
+end
+
+local function flowerPatchParts()
+	local parts = {
+		{ Kind = "Disc", Height = 0.3, Diameter = 4.4, Y = 0.15, Color = BED, Material = LEAFY },
+	}
+	for index, spot in {
+		{ 0, 0 },
+		{ 1.2, 0.6 },
+		{ -1.1, 0.8 },
+		{ 0.5, -1.3 },
+		{ -0.9, -0.9 },
+		{ 1.5, -0.6 },
+		{ -1.6, 0.1 },
+		{ 0.2, 1.5 },
+	} do
+		table.insert(parts, flower(spot[1], 0.45, spot[2], 0.7, FLOWERS[(index - 1) % #FLOWERS + 1]))
+	end
+	return parts
+end
+
+local function tulipRowParts()
+	local parts = {
+		{ Kind = "Box", Size = Vector3.new(5, 0.8, 1.4), Y = 0.4, Color = rgb(150, 100, 70), Material = Enum.Material.Wood },
+		{ Kind = "Box", Size = Vector3.new(4.7, 0.1, 1.1), Y = 0.82, Color = rgb(95, 70, 55) },
+	}
+	for index, x in { -1.9, -0.95, 0, 0.95, 1.9 } do
+		table.insert(parts, { Kind = "Disc", Height = 1.2, Diameter = 0.15, X = x, Y = 1.45, Color = LEAVES[2] })
+		table.insert(parts, leafBall(x + 0.2, 1.2, 0, 0.5, LEAVES[1], 1.4))
+		table.insert(parts, { Kind = "Ball", Size = Vector3.new(0.55, 0.75, 0.55), X = x, Y = 2.2, Color = ({ rgb(215, 70, 90), FLOWERS[1], FLOWERS[3], FLOWERS[4], FLOWERS[5] })[index] })
+	end
+	return parts
+end
+
+-- A pot with a clipped ball tree in it. The leaves are given as balls above the pot.
+local function pottedParts(leaves)
+	local parts = {
+		{ Kind = "Disc", Height = 1.6, Diameter = 2, Y = 0.8, Color = TERRACOTTA, Material = Enum.Material.Concrete },
+		{ Kind = "Disc", Height = 0.25, Diameter = 2.3, Y = 1.6, Color = TERRACOTTA, Material = Enum.Material.Concrete },
+		{ Kind = "Disc", Height = 0.1, Diameter = 1.8, Y = 1.7, Color = rgb(95, 70, 55) },
+		{ Kind = "Disc", Height = 2.8, Diameter = 0.3, Y = 3.1, Color = BARK, Material = Enum.Material.Wood },
+	}
+	for _, leaf in leaves do
+		table.insert(parts, leaf)
+	end
+	return parts
+end
+
+-- The park's green tree at 0.6 of its size.
+local function littleTreeParts()
+	return {
+		{ Kind = "Disc", Height = 3.6, Diameter = 0.72, Y = 1.8, Color = BARK, Material = Enum.Material.Wood },
+		leafBall(0, 5.04, 0, 4.8, LEAVES[1], 1),
+		leafBall(1.14, 5.76, 0.54, 3.6, LEAVES[2], 1),
+		leafBall(-1.02, 5.52, -0.6, 3.72, LEAVES[3], 1),
+		leafBall(0.18, 6.72, -0.24, 3, LEAVES[1], 1),
+	}
+end
+
+local function roseArchParts()
+	local white = rgb(250, 248, 242)
+	local parts = {
+		{ Kind = "Box", Size = Vector3.new(0.4, 7, 0.4), X = -2.2, Y = 3.5, Color = white, Material = Enum.Material.Wood },
+		{ Kind = "Box", Size = Vector3.new(0.4, 7, 0.4), X = 2.2, Y = 3.5, Color = white, Material = Enum.Material.Wood },
+		{ Kind = "Box", Size = Vector3.new(4.8, 0.4, 0.4), Y = 7.1, Color = white, Material = Enum.Material.Wood },
+	}
+	for _, spot in { { -2.2, 1.4 }, { -2.2, 3 }, { -2.2, 4.6 }, { -2.2, 6.2 }, { 2.2, 1.6 }, { 2.2, 3.2 }, { 2.2, 4.8 }, { 2.2, 6.3 }, { -1.3, 7.3 }, { 0, 7.5 }, { 1.3, 7.3 } } do
+		table.insert(parts, leafBall(spot[1], spot[2], 0, 1.4, LEAVES[(math.floor(spot[2]) % 3) + 1], 1))
+	end
+	for index, spot in { { -2.5, 2.2 }, { -1.9, 3.9 }, { -2.5, 5.5 }, { 1.9, 2.4 }, { 2.5, 4.1 }, { 1.9, 5.6 }, { -0.7, 7.8 }, { 0.7, 7.9 }, { -1.7, 7.1 }, { 1.7, 7.0 } } do
+		table.insert(parts, { Kind = "Ball", Diameter = 0.5, X = spot[1], Y = spot[2], Z = -0.55, Color = index % 2 == 0 and rgb(215, 70, 90) or FLOWERS[1] })
+	end
+	return parts
+end
+
+-- A heart of clipped leaves on a stem in a pot, dotted with pink roses.
+local function heartParts()
+	local parts = pottedParts({
+		{ Kind = "Ball", Size = Vector3.new(2.2, 2.2, 1.6), X = -0.75, Y = 5.6, Color = LEAVES[2], Material = LEAFY },
+		{ Kind = "Ball", Size = Vector3.new(2.2, 2.2, 1.6), X = 0.75, Y = 5.6, Color = LEAVES[2], Material = LEAFY },
+		{ Kind = "Box", Size = Vector3.new(2.25, 2.25, 1.5), Y = 4.85, Turn = Vector3.new(0, 0, 45), Color = LEAVES[2], Material = LEAFY },
+		{ Kind = "Box", Size = Vector3.new(0.5, 0.25, 0.4), Y = 2.4, Color = rgb(240, 150, 175) },
+	})
+	for _, spot in { { -1.2, 6.2 }, { -0.3, 5.9 }, { 1.1, 6.3 }, { 0.5, 5.2 }, { -0.8, 4.9 }, { 0, 4.1 } } do
+		table.insert(parts, { Kind = "Ball", Diameter = 0.45, X = spot[1], Y = spot[2], Z = -0.75, Color = FLOWERS[1] })
+	end
+	return parts
+end
+
+-- The park's cherry tree at 0.7 of its size, with its blossom fixed in place. The invisible
+-- box under the blossom drops petals.
+local function cherryParts()
+	local parts = {
+		{ Kind = "Disc", Height = 3.5, Diameter = 0.7, Y = 1.75, Color = CHERRY_BARK, Material = Enum.Material.Wood },
+		{ Kind = "Disc", Height = 2.1, Diameter = 0.32, X = 0.81, Y = 3.61, Turn = Vector3.new(0, 0, -50), Color = CHERRY_BARK, Material = Enum.Material.Wood },
+		{ Kind = "Disc", Height = 2.1, Diameter = 0.32, X = -0.81, Y = 3.61, Turn = Vector3.new(0, 0, 50), Color = CHERRY_BARK, Material = Enum.Material.Wood },
+		{ Kind = "Box", Size = Vector3.new(4.2, 0.5, 4.2), Y = 4, Color = BLOSSOMS[1], Transparency = 1, Petals = true },
+	}
+	for index, blossom in {
+		{ 0.93, 4.4, 1.17, 3.2 },
+		{ -0.36, 4.8, 1.56, 2.9 },
+		{ -1.27, 4.3, 0.6, 3.3 },
+		{ -1.52, 4.9, -0.75, 3 },
+		{ -0.32, 4.4, -1.47, 3.2 },
+		{ 1.02, 4.8, -1.24, 2.9 },
+		{ 0, 5.6, 0, 3.4 },
+	} do
+		table.insert(parts, leafBall(blossom[1], blossom[2], blossom[3], blossom[4], BLOSSOMS[(index - 1) % 3 + 1]))
+	end
+	return parts
+end
+
+-- A round marble planter with a gold rim, golden and white flowers and little bushes.
+local function goldenBedParts()
+	local gold = rgb(235, 190, 80)
+	local parts = {
+		{ Kind = "Disc", Height = 1, Diameter = 6, Y = 0.5, Color = rgb(242, 236, 230), Material = Enum.Material.Marble },
+		{ Kind = "Disc", Height = 0.15, Diameter = 6.2, Y = 1.0, Color = gold, Material = Enum.Material.Foil },
+		{ Kind = "Disc", Height = 0.12, Diameter = 5.4, Y = 1.1, Color = BED, Material = LEAFY },
+		leafBall(0, 1.75, 0, 1.8, LEAVES[1]),
+	}
+	for index = 1, 3 do
+		local angle = index * 2 * math.pi / 3
+		table.insert(parts, leafBall(math.cos(angle) * 1.6, 1.55, math.sin(angle) * 1.6, 1.4, LEAVES[index % 3 + 1]))
+	end
+	for index = 1, 12 do
+		local angle = index * 2 * math.pi / 12 + 0.3
+		local out = index % 2 == 0 and 2.3 or 1.1
+		table.insert(parts, flower(math.cos(angle) * out, 1.35, math.sin(angle) * out, 0.75, index % 3 == 0 and FLOWERS[2] or rgb(255, 210, 80)))
+	end
+	return parts
+end
+
+for _, plant in {
+	{ Id = "FlowerPatch", Name = "Flower Patch", Coins = 400, Charm = 2, Parts = flowerPatchParts() },
+	{ Id = "TulipRow", Name = "Tulip Row", Coins = 600, Charm = 2, Parts = tulipRowParts() },
+	{ Id = "RoundBush", Name = "Round Bush", Coins = 750, Charm = 2, Parts = bushParts(false) },
+	{ Id = "FloweringBush", Name = "Flowering Bush", Coins = 1000, Charm = 3, Parts = bushParts(true) },
+	{
+		Id = "PottedTopiary",
+		Name = "Potted Topiary",
+		Coins = 1200,
+		Charm = 3,
+		Parts = pottedParts({ leafBall(0, 3.1, 0, 1.6, LEAVES[2], 1), leafBall(0, 5.1, 0, 2.6, LEAVES[1], 1) }),
+	},
+	{
+		Id = "BoxHedge",
+		Name = "Box Hedge",
+		Coins = 1500,
+		Charm = 3,
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(6, 2.6, 1.8), Y = 1.3, Color = LEAVES[2], Material = LEAFY },
+			{ Kind = "Box", Size = Vector3.new(5.8, 0.3, 1.6), Y = 2.7, Color = LEAVES[1], Material = LEAFY },
+		},
+	},
+	{ Id = "LittleTree", Name = "Little Green Tree", Coins = 2000, Charm = 4, Parts = littleTreeParts() },
+	{ Id = "RoseArch", Name = "Rose Arch", Coins = 2500, Charm = 4, Parts = roseArchParts() },
+	{ Id = "HeartTopiary", Name = "Heart Topiary", Stars = 20, Charm = 10, Parts = heartParts() },
+	{ Id = "CherryTree", Name = "Cherry Blossom Tree", Stars = 30, Charm = 12, Parts = cherryParts() },
+	{ Id = "GoldenBed", Name = "Golden Flower Bed", Stars = 40, Charm = 15, Sparkles = true, Parts = goldenBedParts() },
+} do
+	plant.Room = "Garden"
+	table.insert(Config.Items, plant)
+end
+
 function Config.GetItem(id)
 	for _, item in Config.Items do
 		if item.Id == id then
@@ -1000,6 +1208,36 @@ Config.Stash = {
 	Detail = "A storage room through a back door. The Stocker keeps extra treats on its shelves until your cases have room",
 }
 
+-- The outside of a bakery, changed in the popup that opens when its owner taps its sign.
+-- The owner can name the bakery (up to NameLength characters, once every RenameSeconds),
+-- and paint each of Parts with any of Config.Paints. Primary is the outside of the walls,
+-- and Secondary the trim along their top and the sign board. Going back to the colour the
+-- bakery was built in is free.
+Config.Exterior = {
+	NameLength = 24,
+	RenameSeconds = 2,
+	Parts = {
+		{ Id = "Primary", Name = "Walls", Detail = "The outside of your bakery", Coins = 100 },
+		{ Id = "Secondary", Name = "Trim", Detail = "The edge along the top and the sign board", Coins = 50 },
+	},
+}
+
+function Config.GetExteriorPart(id)
+	for _, part in Config.Exterior.Parts do
+		if part.Id == id then
+			return part
+		end
+	end
+	return nil
+end
+
+-- A yard around the bakery for garden plants, bought once in the sign's popup.
+Config.Garden = {
+	Name = "Garden",
+	Coins = 8000,
+	Detail = "A yard around your bakery for luxury bushes, trees and flowers",
+}
+
 -- Bigger bakeries, bought in order from the Decorate menu's Expansion tab. Each step moves
 -- the back wall Back studs further back and each side wall Side studs further out. The
 -- front, with the door and sign, stays put.
@@ -1031,6 +1269,10 @@ Config.Paints = {
 	{ Id = "Lavender", Name = "Lavender", Color = rgb(215, 200, 240) },
 	{ Id = "Cocoa", Name = "Cocoa", Color = rgb(150, 105, 85) },
 	{ Id = "Cherry", Name = "Cherry", Color = rgb(215, 70, 90) },
+	{ Id = "Brick", Name = "Brick", Color = rgb(180, 85, 70) },
+	{ Id = "Sage", Name = "Sage", Color = rgb(165, 190, 150) },
+	{ Id = "Denim", Name = "Denim", Color = rgb(95, 125, 170) },
+	{ Id = "Charcoal", Name = "Charcoal", Color = rgb(70, 70, 80) },
 }
 -- What can be painted. Walls lists part names in the plot's Walls folder, and Oven lists
 -- part names in its Oven model. Original is the paint it starts with.
