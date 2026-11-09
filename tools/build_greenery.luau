@@ -5,7 +5,7 @@
 -- Run it after build_town, which rebuilds the whole Town folder. Safe to run again: it
 -- rebuilds Greenery from a fixed seed, so the same park comes out.
 --
--- Nothing goes where a bakery could grow to (its largest expansion), in front of a bakery
+-- Nothing goes in a bakery's garden (around its largest expansion), in front of a bakery
 -- or the grocery store (their paths, crates and the flyer stand), on the townsfolk's ways in
 -- and out of town, or on their spots on the plaza. setUpTown in BakerySystem works those
 -- out the same way.
@@ -36,9 +36,11 @@ local PETAL = "rbxassetid://74180373620457"
 local UPRIGHT = CFrame.Angles(0, 0, math.rad(90)) -- cylinders run along X, so stand them up
 
 -- How far bakeries and the grocery store keep clear around them, in their own floor's frame
--- (+Z faces the plaza). Bakeries use their largest expansion, walls included.
+-- (+Z faces the plaza). Bakeries keep their garden clear (Layout.GardenBounds, around their
+-- largest expansion), with a stud to spare.
 local largest = Layout.Largest
-local BAKERY_BOX = { MinX = largest.MinX - 4, MaxX = largest.MaxX + 4, MinZ = largest.MinZ - 4, MaxZ = largest.MaxZ + 4 }
+local yard = Layout.GardenBounds()
+local BAKERY_BOX = { MinX = yard.MinX - 1, MaxX = yard.MaxX + 1, MinZ = yard.MinZ - 1, MaxZ = yard.MaxZ + 1 }
 -- The Sweet Stash behind the back wall of the largest bakery, walls included.
 local stash = Layout.StashBounds(#require(game.ReplicatedStorage.Config).Expansions)
 local STASH_BOX = { MinX = stash.MinX - 5, MaxX = stash.MaxX + 5, MinZ = stash.MinZ - 5, MaxZ = largest.MinZ }
