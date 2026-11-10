@@ -76,7 +76,12 @@ local coBakers = {}
 local lastAction = {}
 local friendPairs = {}
 
+-- A restaurant nobody is managing has a stand-in owner, a table rather than a Player (see
+-- progress.showcase). Anything sent to a player skips it.
 local function notify(player, text, sound)
+	if typeof(player) ~= "Instance" then
+		return
+	end
 	notifyEvent:FireClient(player, text, sound)
 end
 
@@ -160,6 +165,9 @@ local function rushPower(data)
 	if data.BoostUntil > now then
 		power += Config.BoostRush
 	end
+	if data.RestaurantNumber > 1 then
+		power += Config.Restaurants.CustomerBonus
+	end
 	return power
 end
 
@@ -171,13 +179,13 @@ local function earn(player, data, amount)
 	return coins
 end
 
--- Bakery Levels. It's one table, not two locals, because this script is near Luau's limit of
--- 200 local variables.
-local bakeryLevel = {}
+-- Bakery Levels and restaurants. It's one table, not many locals, because this script is at
+-- Luau's limit of 200 local variables.
+local progress = {}
 
 -- Learns every recipe whose UnlockLevel the bakery has reached, in order, and returns
 -- their names. A recipe bought with coins still comes first, so learning stops there.
-function bakeryLevel.learn(data)
+function progress.learn(data)
 	local learned = {}
 	while true do
 		local recipe = Config.Recipes[data.RecipesUnlocked + 1]
@@ -192,7 +200,7 @@ end
 
 -- Adds Bakery XP for the owner's bakery (the base price of what sold) and levels it up.
 -- A level that teaches a recipe gets a popup, and other levels a toast. The caller syncs.
-function bakeryLevel.addXp(player, data, xp)
+function progress.addXp(player, data, xp)
 	local levels = Config.BakeryLevel.Xp
 	if not levels[data.BakeryLevel] then
 		return
@@ -208,8 +216,8 @@ function bakeryLevel.addXp(player, data, xp)
 		data.BakeryXp = 0
 	end
 	if reached then
-		local learned = bakeryLevel.learn(data)
-		if #learned > 0 then
+		local learned = progress.learn(data)
+		if #learned > 0 and typeof(player) == "Instance" then
 			popupEvent:FireClient(player, "LevelUp", { Level = reached, Learned = learned, Max = reached == Config.BakeryLevel.Max })
 		else
 			notify(player, ("Level up! Your bakery is level %d"):format(reached), "Ding")
@@ -402,6 +410,9 @@ end
 -- Co-bakers are guided around the bakery they're working in, using its owner's ovens,
 -- cases and pantry, and their own tray.
 local function updateGuide(player)
+	if typeof(player) ~= "Instance" then
+		return
+	end
 	local plot = workPlot(player)
 	local data = PlayerData.Get(player)
 	local host = plot and plot.owner and PlayerData.Get(plot.owner)
@@ -791,6 +802,9 @@ end
 -- orders. skipCoBakers stops two players baking in each other's bakeries from syncing
 -- each other forever.
 local function syncStats(player, skipCoBakers)
+	if typeof(player) ~= "Instance" then
+		return
+	end
 	local data = PlayerData.Get(player)
 	if not data then
 		return
@@ -849,6 +863,10 @@ local function syncStats(player, skipCoBakers)
 		RecipesUnlocked = data.RecipesUnlocked,
 		BakeryLevel = data.BakeryLevel,
 		BakeryXp = data.BakeryXp,
+		Restaurant = data.RestaurantNumber,
+		RestaurantsOpened = data.RestaurantsOpened,
+		CanOpenRestaurant = progress.canOpen(data),
+		CustomerBonus = data.RestaurantNumber > 1 and Config.Restaurants.CustomerBonus or 0,
 		XpNeeded = Config.BakeryLevel.Xp[data.BakeryLevel],
 		Levels = upgradeLevels(data),
 		Tray = data.Tray,
@@ -1007,7 +1025,8 @@ local function startBake(plot, oven, player, recipe)
 	local data = PlayerData.Get(plot.owner)
 	local own = PlayerData.Get(player)
 	local session = plot.session
-	for id, count in recipe.Ingredients do
+	-- A restaurant running just for show never runs out.
+	for id, count in plot.showcase and {} or recipe.Ingredients do
 		data.Pantry[id] -= count
 	end
 	oven.state = "baking"
@@ -1935,7 +1954,7 @@ function exterior.showName(plot)
 	task.spawn(function()
 		local ok, shown = pcall(function()
 			return game:GetService("TextService")
-				:FilterStringAsync(raw, owner.UserId, Enum.TextFilterContext.PublicChat)
+				:FilterStringAsync(raw, math.abs(owner.UserId), Enum.TextFilterContext.PublicChat)
 				:GetNonChatStringForBroadcastAsync()
 		end)
 		if not ok then
@@ -2050,7 +2069,7 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 		if recipe and recipe.UnlockCost and buy(player, data, recipe.UnlockCost) then
 			data.RecipesUnlocked += 1
 			-- Recipes the bakery's level has already reached come straight after it.
-			local learned = bakeryLevel.learn(data)
+			local learned = progress.learn(data)
 			syncStats(player)
 			table.insert(learned, 1, recipe.Name)
 			notify(player, table.concat(learned, " and ") .. " unlocked!", "Coin")
@@ -2389,7 +2408,7 @@ shipEvent.OnServerEvent:Connect(function(player, slot)
 	-- The XP goes to the bakery the order came from, which is the owner's.
 	local ownerData = PlayerData.Get(plot.owner)
 	if ownerData then
-		bakeryLevel.addXp(plot.owner, ownerData, xp)
+		progress.addXp(plot.owner, ownerData, xp)
 	end
 	data.Stars += order.Stars
 	addGoalProgress(data, "Ship")
@@ -2986,7 +3005,7 @@ function checkout.pay(plot, person)
 	end
 	data.Stars += stars
 	addGoalProgress(data, "Sell", table.find(Config.Recipes, recipe))
-	bakeryLevel.addXp(owner, data, recipe.Price)
+	progress.addXp(owner, data, recipe.Price)
 	syncStats(owner)
 	if person.golden then
 		local tips = {}
@@ -3808,7 +3827,7 @@ end
 
 -- Where an employee stands to use an oven, which is also where they wait at the regular oven.
 local function ovenSpot(plot, data, slot, ovenId)
-	return spotBy(plot, stationThing(plot, data, ovenId or "Oven"), slot == 1 and 1 or -1)
+	return spotBy(plot, stationThing(plot, data, ovenId or "Oven"), slot == 1 and 1 or slot == 2 and -1 or 0)
 end
 
 -- Builds, dresses and names employees, and handles the Employees menu. It's a function so
@@ -3919,7 +3938,7 @@ local function setUpEmployees()
 	local function filterName(plot, slot, raw)
 		local entry = { Raw = raw, Shown = nil }
 		plot.employeeNames[slot] = entry
-		local ownerId = plot.ownerId
+		local ownerId = math.abs(plot.ownerId or 0)
 		local ok, shown = pcall(function()
 			return TextService:FilterStringAsync(raw, ownerId, Enum.TextFilterContext.PublicChat):GetNonChatStringForBroadcastAsync()
 		end)
@@ -4530,6 +4549,14 @@ do
 		if type(id) ~= "number" or type(yes) ~= "boolean" then
 			return
 		end
+		local manage = progress.manageAsks[owner]
+		if manage and manage.id == id then
+			progress.manageAsks[owner] = nil
+			if yes then
+				progress.switch(owner, manage.plot)
+			end
+			return
+		end
 		for asker, request in requests do
 			if request.id == id and request.owner == owner then
 				requests[asker] = nil
@@ -4622,25 +4649,57 @@ do
 		prompt.Name = "Prompt"
 		prompt.ActionText = "Ask to Bake Together"
 		prompt.ObjectText = plot.owner.DisplayName .. "'s Bakery"
+		-- A restaurant running just for show: only its owner sees this, to manage it.
+		if plot.showcase then
+			prompt.ActionText = "Manage this bakery"
+			prompt.ObjectText = ("Your Restaurant %d"):format(plot.showcase.Number)
+			prompt:SetAttribute("ManageFor", plot.showcase.ShowcaseOf.UserId)
+		end
 		prompt.HoldDuration = 0.3
 		prompt.MaxActivationDistance = 8
 		prompt.RequiresLineOfSight = false
 		prompt:SetAttribute("Active", true)
 		prompt:SetAttribute("Door", true)
 		prompt.Triggered:Connect(function(player)
-			askToCoBake(player, plot)
+			if plot.showcase then
+				progress.askManage(player, plot)
+			else
+				askToCoBake(player, plot)
+			end
 		end)
 		prompt.Parent = part
 		part.Parent = plot.model
 		return part
 	end
+
+	-- The owner tapped Manage at one of their restaurants that runs just for show. They
+	-- answer on the same card as a Bake Together request.
+	progress.manageAsks = {}
+	function progress.askManage(player, plot)
+		local standIn = plot.showcase
+		local data = PlayerData.Get(player)
+		if not standIn or standIn.ShowcaseOf ~= player or not data or not isNear(player, plot.door.Position, 12) then
+			return
+		end
+		nextRequestId += 1
+		progress.manageAsks[player] = { id = nextRequestId, plot = plot }
+		coBakeRequestEvent:FireClient(player, {
+			Id = nextRequestId,
+			Text = ("Manage Restaurant %d? Restaurant %d will keep running by itself"):format(standIn.Number, data.RestaurantNumber),
+			Seconds = Config.CoBake.AnswerSeconds,
+		})
+	end
 end
 
-local function claimPlot(player)
-	for _, plot in plots do
+-- Builds a player's bakery on a free plot, or on wanted when it's free. player can be a
+-- restaurant's stand-in owner (see progress.showcase), whose UserId is the real one made
+-- negative, so nobody's client treats the plot as theirs.
+local function claimPlot(player, wanted)
+	for _, plot in wanted and not wanted.ownerId and { wanted } or plots do
 		if not plot.ownerId then
 			local data = PlayerData.Get(player)
 			plot.owner = player
+			plot.showcase = typeof(player) ~= "Instance" and player or nil
 			plot.ownerId = player.UserId
 			plot.session += 1
 			plot.model:SetAttribute("OwnerId", player.UserId)
@@ -4674,7 +4733,7 @@ local function claimPlot(player)
 			task.spawn(runFlyers, plot, plot.session)
 			plot.doorPart = buildDoorPrompt(plot)
 			refreshEmployees(plot, data)
-			for slot = 1, Config.Employees.Max do
+			for slot = 1, math.max(Config.Employees.Max, #data.Employees) do
 				task.spawn(runEmployee, plot, plot.session, player, slot)
 			end
 			task.spawn(runCrates, plot, plot.session, player)
@@ -4691,6 +4750,7 @@ local function releasePlot(player)
 		return
 	end
 	plot.owner = nil
+	plot.showcase = nil
 	plot.ownerId = nil
 	plot.session += 1
 	plot.model:SetAttribute("OwnerId", nil)
@@ -4763,6 +4823,187 @@ local function applyExclusiveItems(player, data)
 			end
 		end
 	end
+end
+
+-- Restaurants. Each one shown but not managed runs on its own plot with a stand-in owner:
+-- a table with the owner's name, a negative UserId and a copy of that restaurant's save
+-- that is never saved (PlayerData.Showcase). Its three workers keep it busy, it never runs
+-- out of ingredients, and nothing it earns counts. Stand-ins are kept in
+-- progress.standIns[player][number].
+progress.standIns = {}
+
+-- Whether a restaurant can open a new one, and if not, why.
+function progress.canOpen(data)
+	if data.BakeryLevel < Config.BakeryLevel.Max then
+		return false, ("Reach Bakery Level %d"):format(Config.BakeryLevel.Max)
+	end
+	if #data.Employees < Config.Restaurants.Employees then
+		return false, ("Hire %d employees"):format(Config.Restaurants.Employees)
+	end
+	return true, nil
+end
+
+-- Shows one of player's restaurants on a free plot, with a third worker for whichever job
+-- the two hired ones don't cover.
+function progress.showcase(player, entry, plot)
+	local standIn = {
+		UserId = -player.UserId,
+		Name = player.Name,
+		DisplayName = player.DisplayName,
+		Parent = game,
+		ShowcaseOf = player,
+		Number = entry.Number,
+	}
+	local data = PlayerData.Showcase(standIn, entry)
+	for _, job in Config.Employees.Jobs do
+		local covered = false
+		for _, employee in data.Employees do
+			covered = covered or employee.Job == job
+		end
+		if not covered then
+			table.insert(data.Employees, PlayerData.NewEmployee(data.Employees, job))
+		end
+	end
+	for id in data.Pantry do
+		data.Pantry[id] = pantryCapacity(data)
+	end
+	progress.standIns[player] = progress.standIns[player] or {}
+	progress.standIns[player][entry.Number] = standIn
+	claimPlot(standIn, plot)
+end
+
+function progress.hide(standIn)
+	releasePlot(standIn)
+	PlayerData.Forget(standIn)
+	local mine = progress.standIns[standIn.ShowcaseOf]
+	if mine and mine[standIn.Number] == standIn then
+		mine[standIn.Number] = nil
+	end
+end
+
+-- Puts the newest restaurants nobody is managing on the plots players aren't using. Each
+-- player's newest comes before anyone's second newest. leaving is a player on their way out.
+function progress.refresh(leaving)
+	local wanted = {}
+	for _, player in Players:GetPlayers() do
+		local data = player ~= leaving and playerPlots[player] and PlayerData.Get(player)
+		for rank, entry in data and data.Restaurants or {} do
+			table.insert(wanted, { player = player, entry = entry, rank = rank })
+		end
+	end
+	table.sort(wanted, function(a, b)
+		if a.rank ~= b.rank then
+			return a.rank < b.rank
+		end
+		return a.entry.Number > b.entry.Number
+	end)
+	local room = 0
+	for _, plot in plots do
+		if not plot.ownerId or plot.showcase then
+			room += 1
+		end
+	end
+	local keep = {}
+	for index = 1, math.min(room, #wanted) do
+		keep[wanted[index].player.UserId .. ":" .. wanted[index].entry.Number] = wanted[index]
+	end
+	for _, plot in plots do
+		local standIn = plot.showcase
+		if standIn and not keep[standIn.ShowcaseOf.UserId .. ":" .. standIn.Number] then
+			progress.hide(standIn)
+		elseif standIn then
+			keep[standIn.ShowcaseOf.UserId .. ":" .. standIn.Number] = nil
+		end
+	end
+	for _, want in keep do
+		progress.showcase(want.player, want.entry)
+	end
+end
+
+-- A player joining with every plot taken gets the plot of the oldest restaurant on show.
+function progress.makeRoom()
+	local oldest = nil
+	for _, plot in plots do
+		if not plot.ownerId then
+			return
+		end
+		if plot.showcase and (not oldest or plot.showcase.Number < oldest.Number) then
+			oldest = plot.showcase
+		end
+	end
+	if oldest then
+		progress.hide(oldest)
+	end
+end
+
+function progress.leave(player)
+	for _, standIn in progress.standIns[player] or {} do
+		progress.hide(standIn)
+	end
+	progress.standIns[player] = nil
+	progress.manageAsks[player] = nil
+	progress.refresh(player)
+end
+
+-- Rebuilds the player's bakery on plot from whatever their save now manages.
+function progress.rebuild(player, data, plot)
+	applyExclusiveItems(player, data)
+	hotbars[player] = nil
+	claimPlot(player, plot)
+	progress.refresh()
+	syncStats(player)
+	sendToPlot(player, playerPlots[player])
+end
+
+-- Why a player can't swap restaurants right now, or nil.
+function progress.busy(player)
+	local plot = playerPlots[player]
+	if coBakers[player] or (plot and #coBakersOf(plot) > 0) then
+		return "Stop baking together first, in the Friends menu"
+	end
+	return nil
+end
+
+remote("OpenRestaurant").OnServerEvent:Connect(function(player)
+	local data = PlayerData.Get(player)
+	local plot = playerPlots[player]
+	if not data or not plot then
+		return
+	end
+	local ok, reason = progress.canOpen(data)
+	local problem = not ok and reason .. " first" or progress.busy(player)
+	if problem then
+		notify(player, problem)
+		return
+	end
+	local old = data.RestaurantNumber
+	PlayerData.OpenRestaurant(player)
+	releasePlot(player)
+	progress.rebuild(player, data, plot)
+	popupEvent:FireClient(player, "NewRestaurant", { Number = data.RestaurantNumber, Old = old })
+end)
+
+-- Yes on the Manage card: the restaurant on show becomes the managed one, on that plot, and
+-- the one being managed goes on show if there's room.
+function progress.switch(player, plot)
+	local standIn = plot.showcase
+	local data = PlayerData.Get(player)
+	if not standIn or standIn.ShowcaseOf ~= player or not data or not playerPlots[player] then
+		return
+	end
+	local problem = progress.busy(player)
+	if problem then
+		notify(player, problem)
+		return
+	end
+	local number = standIn.Number
+	if not PlayerData.SwapRestaurant(player, number) then
+		return
+	end
+	progress.hide(standIn)
+	releasePlot(player)
+	progress.rebuild(player, data, plot)
+	notify(player, ("You're managing Restaurant %d"):format(number), "Ding")
 end
 
 local function updateVipTag(player)
@@ -4848,7 +5089,7 @@ local function sellWhileAway(player, data)
 	end
 	if sold > 0 then
 		popupEvent:FireClient(player, "Away", { Sold = sold, Coins = earn(player, data, coins) })
-		bakeryLevel.addXp(player, data, xp)
+		progress.addXp(player, data, xp)
 	end
 end
 
@@ -5103,7 +5344,9 @@ local function onPlayerAdded(player)
 		data.ShoesRefund = nil
 	end
 
+	progress.makeRoom()
 	local plot = claimPlot(player)
+	progress.refresh()
 	syncStats(player)
 	sendToPlot(player, plot)
 	applyWalkSpeed(player)
@@ -5308,6 +5551,7 @@ Players.PlayerRemoving:Connect(function(player)
 	endCoBakingFor(player)
 	removeFriendPairs(player)
 	releasePlot(player)
+	progress.leave(player)
 	carriedTrays[player] = nil
 	hotbars[player] = nil
 	running[player] = nil
