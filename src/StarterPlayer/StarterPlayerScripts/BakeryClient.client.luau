@@ -3972,6 +3972,8 @@ end
 
 -- A customer on their way to a bakery thinks of the treat they want: a white cloud with
 -- two small puffs trailing down to their head, sized in studs so it shrinks with distance.
+-- It lives in PlayerGui with the customer as its Adornee, because a ViewportFrame in a
+-- BillboardGui under the Workspace draws nothing.
 local function thoughtBubble(root, recipeIndex)
 	local bubble = Instance.new("BillboardGui")
 	bubble.Name = "Thought"
@@ -4006,7 +4008,8 @@ local function thoughtBubble(root, recipeIndex)
 	icon.LightColor = WHITE
 	icon.Parent = cloud
 	showTreat(icon, recipeIndex)
-	bubble.Parent = root
+	bubble.Adornee = root
+	bubble.Parent = player.PlayerGui
 	return bubble
 end
 
@@ -4027,6 +4030,13 @@ local function watchWants(model)
 		end
 	end
 	model:GetAttributeChangedSignal("Wants"):Connect(update)
+	-- The bubble isn't inside the customer, so it goes when they do.
+	model.AncestryChanged:Connect(function()
+		if bubble and not model:IsDescendantOf(workspace) then
+			bubble:Destroy()
+			bubble = nil
+		end
+	end)
 	update()
 end
 
