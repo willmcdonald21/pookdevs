@@ -842,6 +842,8 @@ local function syncStats(player, skipCoBakers)
 	if host then
 		work = {
 			OwnerName = coPlot.owner.DisplayName,
+			-- The plot's model name, so the client can show its treat designs.
+			Plot = coPlot.model.Name,
 			RecipesUnlocked = host.RecipesUnlocked,
 			Levels = upgradeLevels(host),
 			Pantry = host.Pantry,
