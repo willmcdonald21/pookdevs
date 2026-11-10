@@ -661,6 +661,30 @@ function panels.Cookbook()
 		addRow(Config.DescribeGoal(goal), detail, { action })
 	end
 	addRow("New goals every day", "Come back tomorrow for more", {})
+	if state.Work then
+		return
+	end
+	addHeader(("Restaurant %d"):format(state.Restaurant))
+	local need = ("At Bakery Level %d with %d employees, open a new restaurant. It starts over with its own coins and gets %d%% more customers, and this one keeps running by itself."):format(
+		Config.BakeryLevel.Max,
+		Config.Restaurants.Employees,
+		math.floor(Config.Restaurants.CustomerBonus * 100 + 0.5)
+	)
+	addRow("Open a new restaurant", need, {
+		state.CanOpenRestaurant and {
+			Text = "Open",
+			Color = GREEN,
+			OnClick = function()
+				panels.askYesNo(
+					("Open Restaurant %d?"):format(state.RestaurantsOpened + 1),
+					"It starts over: coins, level, recipes, upgrades, decor and employees. Stars and passes come with you",
+					function()
+						ReplicatedStorage:WaitForChild("OpenRestaurant"):FireServer()
+					end
+				)
+			end,
+		} or { Text = "Locked", Color = GREY },
+	})
 end
 
 -- A co-baker sees the pantry of the bakery they're working in.
@@ -712,6 +736,8 @@ do
 	local ok = button("Ok", UDim2.new(0.5, -12, 0, 52), UDim2.new(0.5, 0, 1, -10), Vector2.new(0.5, 1), GREEN, box)
 	ok.Text = "OK"
 	ok.ZIndex = 13
+	-- Other menus borrow this box through panels.askYesNo. While they do, Yes runs theirs.
+	local custom = nil
 
 	-- How many ingredients filling the pantry takes, and what they cost.
 	local function everything()
@@ -730,6 +756,9 @@ do
 	-- are needed, with OK. If that changes while it's open, it closes rather than swap the
 	-- buttons under the player's finger.
 	local function updateBox(opening)
+		if custom then
+			return
+		end
 		local count, total = everything()
 		local short = total - state.Coins
 		if count == 0 or (not opening and (short <= 0) ~= yes.Visible) then
@@ -751,9 +780,17 @@ do
 	for _, close in { no, ok } do
 		close.Activated:Connect(function()
 			box.Visible = false
+			custom = nil
 		end)
 	end
 	yes.Activated:Connect(function()
+		if custom then
+			local run = custom
+			custom = nil
+			box.Visible = false
+			run()
+			return
+		end
 		local count, total = everything()
 		if count > 0 and total <= state.Coins then
 			buyGroceriesEvent:FireServer("All", total)
@@ -761,12 +798,22 @@ do
 		end
 	end)
 
+	-- A Yes / No box over any menu. It isn't a menu itself, so setPanel never opens it.
+	function panels.askYesNo(questionText, noteText, onYes)
+		custom = onYes
+		question.Text = questionText
+		note.Text = noteText
+		yes.Visible, no.Visible, ok.Visible = true, true, false
+		box.Visible = true
+	end
+
 	function panels.Grocery()
 		panelTitle.Text = "Grocery Store"
 		local fillAll = everything() > 0 and {
 			Text = "Buy all",
 			Color = GOLD,
 			OnClick = function()
+				custom = nil
 				updateBox(true)
 				box.Visible = true
 			end,
@@ -3670,6 +3717,13 @@ popupEvent.OnClientEvent:Connect(function(kind, info)
 			body ..= "\n\nThat's the top level. Amazing baking!"
 		end
 		queuePopup("Level up!", body, "Yay!")
+	elseif kind == "NewRestaurant" then
+		local body = ("Welcome to Restaurant %d! It starts fresh, with its own coins, and gets %d%% more customers.\n\nRestaurant %d keeps running by itself on a free plot. Walk up to its door to manage it again."):format(
+			info.Number,
+			math.floor(Config.Restaurants.CustomerBonus * 100 + 0.5),
+			info.Old
+		)
+		queuePopup("A new restaurant!", body, "Let's bake!")
 	end
 end)
 
@@ -3713,7 +3767,7 @@ do
 	requestEvent.OnClientEvent:Connect(function(info)
 		local id = info.Id
 		current = id
-		text.Text = ("%s wants to bake with you!"):format(info.Name)
+		text.Text = info.Text or ("%s wants to bake with you!"):format(info.Name)
 		card.Visible = true
 		if sounds.Ding then
 			sounds.Ding:Play()
@@ -3741,7 +3795,10 @@ local function refreshPrompt(prompt)
 	local plot = plotOf(prompt)
 	local active = prompt:GetAttribute("Active") == true
 	local coBaking = plot ~= nil and player:GetAttribute("CoBaking") == plot.Name
-	if prompt:GetAttribute("Door") then
+	if prompt:GetAttribute("ManageFor") then
+		-- "Manage this bakery" on one of your own restaurants that runs just for show.
+		prompt.Enabled = active and prompt:GetAttribute("ManageFor") == player.UserId
+	elseif prompt:GetAttribute("Door") then
 		prompt.Enabled = active and plot ~= nil and plot:GetAttribute("OwnerId") ~= nil and not isMine(plot) and not coBaking
 	else
 		prompt.Enabled = active and (isMine(plot) or (coBaking and prompt:GetAttribute("CoBake") == true))
