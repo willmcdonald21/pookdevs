@@ -1,5 +1,6 @@
 -- Loads and saves each player's progress.
 local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -12,6 +13,8 @@ local LOCK_EXPIRY = 180
 local LOCK_RETRIES = 6
 local LOCK_RETRY_DELAY = 5
 local MAX_RECEIPTS = 100
+-- The most restaurants a save keeps besides the one being managed. The oldest go first.
+local MAX_RESTAURANTS = 50
 
 local PlayerData = {}
 local sessions = {}
@@ -43,6 +46,17 @@ end
 
 -- Coins spent on Comfy Shoes by each level, from the Shop's last prices.
 local SHOES_REFUNDS = { 0, 40, 340, 1840 }
+
+-- What belongs to one restaurant. Opening a new restaurant starts these over, and the rest
+-- of a save (Stars, receipts, boosts, the daily streak, invites) stays with the player.
+local RESTAURANT_FIELDS = {
+	"Coins", "RecipesUnlocked", "BakeryLevel", "BakeryXp", "Tray", "Owned", "Placed", "Stock",
+	"Stations", "LayoutVersion", "LuxuryOven", "Stash", "Expansion", "Paint", "Exterior",
+	"BakeryName", "Garden", "Floor", "Goals", "Employees", "LastRecipe", "SparePaint", "Pantry",
+}
+for _, upgrade in Config.Upgrades do
+	table.insert(RESTAURANT_FIELDS, upgrade.Id .. "Level")
+end
 
 local function cleanLevel(value, max)
 	return math.clamp(math.floor(tonumber(value) or 1), 1, max)
@@ -435,7 +449,97 @@ local function clean(saved)
 		local count = savedPantry and cleanCount(savedPantry[ingredient.Id]) or Config.StartingPantry
 		data.Pantry[ingredient.Id] = math.min(count, capacity)
 	end
+
+	-- Restaurants. RestaurantNumber is the one being managed (1 is the first bakery), and
+	-- Restaurants holds the others, each with its Number and its RESTAURANT_FIELDS.
+	data.RestaurantNumber = math.max(1, cleanCount(saved.RestaurantNumber))
+	data.RestaurantsOpened = math.max(data.RestaurantNumber, cleanCount(saved.RestaurantsOpened))
+	data.Restaurants = {}
+	local seen = { [data.RestaurantNumber] = true }
+	for _, entry in type(saved.Restaurants) == "table" and saved.Restaurants or {} do
+		local number = type(entry) == "table" and tonumber(entry.Number)
+		if number and number % 1 == 0 and number >= 1 and not seen[number] then
+			seen[number] = true
+			local restaurant = clean(entry)
+			local kept = { Number = number }
+			for _, field in RESTAURANT_FIELDS do
+				kept[field] = restaurant[field]
+			end
+			table.insert(data.Restaurants, kept)
+			data.RestaurantsOpened = math.max(data.RestaurantsOpened, number)
+		end
+	end
+	table.sort(data.Restaurants, function(a, b)
+		return a.Number > b.Number
+	end)
+	while #data.Restaurants > MAX_RESTAURANTS do
+		table.remove(data.Restaurants)
+	end
 	return data
+end
+
+-- Copies the managed restaurant's fields out of a save, tagged with its number.
+local function takeRestaurant(data)
+	local entry = { Number = data.RestaurantNumber }
+	for _, field in RESTAURANT_FIELDS do
+		entry[field] = data[field]
+	end
+	return entry
+end
+
+local function putRestaurant(data, entry)
+	for _, field in RESTAURANT_FIELDS do
+		data[field] = entry[field]
+	end
+	data.RestaurantNumber = entry.Number
+end
+
+-- Opens a new restaurant: the one being managed joins Restaurants, and the save gets a
+-- fresh start for every restaurant field. The caller rebuilds the bakery.
+function PlayerData.OpenRestaurant(player)
+	local data = PlayerData.Get(player)
+	table.insert(data.Restaurants, takeRestaurant(data))
+	table.sort(data.Restaurants, function(a, b)
+		return a.Number > b.Number
+	end)
+	while #data.Restaurants > MAX_RESTAURANTS do
+		table.remove(data.Restaurants)
+	end
+	data.RestaurantsOpened += 1
+	local fresh = clean({})
+	fresh.Number = data.RestaurantsOpened
+	putRestaurant(data, fresh)
+end
+
+-- Makes restaurant number the managed one, and puts the one being managed with the others.
+-- Returns false when the save has no such restaurant.
+function PlayerData.SwapRestaurant(player, number)
+	local data = PlayerData.Get(player)
+	for index, entry in data.Restaurants do
+		if entry.Number == number then
+			data.Restaurants[index] = takeRestaurant(data)
+			putRestaurant(data, entry)
+			table.sort(data.Restaurants, function(a, b)
+				return a.Number > b.Number
+			end)
+			return true
+		end
+	end
+	return false
+end
+
+-- A restaurant nobody is managing can still open on a free plot, just for show. Its stand-in
+-- owner (a table, not a Player) gets a copy of its save that is never saved, so nothing it
+-- does counts. Showcase(standIn, entry) sets that up, and Forget(standIn) ends it.
+function PlayerData.Showcase(standIn, entry)
+	local data = clean(HttpService:JSONDecode(HttpService:JSONEncode(entry)))
+	data.RestaurantNumber = entry.Number
+	sessions[standIn] = { data = data, canSave = false, released = true }
+	return data
+end
+
+function PlayerData.Forget(standIn)
+	sessions[standIn] = nil
 end
 
 local function newLock()
