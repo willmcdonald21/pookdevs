@@ -225,9 +225,19 @@ runButton.Activated:Connect(function()
 	setRunning(true)
 end)
 
--- Shows a treat in a ViewportFrame, seen from a little above.
-local function showTreat(viewport, recipeIndex)
-	local model = ItemBuilder.Build(Config.Recipes[recipeIndex], 1, CFrame.new())
+-- Shows a treat in a ViewportFrame, seen from a little above, the way the bakery plotModel
+-- has designed it. With no plotModel, that's the bakery you're working in.
+local function showTreat(viewport, recipeIndex, plotModel)
+	if not plotModel then
+		local work = state and state.Work
+		for _, plot in plotsFolder:GetChildren() do
+			if work and plot.Name == work.Plot or not work and plot:GetAttribute("OwnerId") == player.UserId then
+				plotModel = plot
+			end
+		end
+	end
+	-- TreatArt is required here, not at the top: this script is at Luau's 200-local limit.
+	local model = require(script.Parent:WaitForChild("TreatArt")).Build(recipeIndex, plotModel, 1, CFrame.new())
 	ItemBuilder.Anchor(model)
 	model.Parent = viewport
 	local center, extents = model:GetBoundingBox()
@@ -623,7 +633,19 @@ function panels.Cookbook()
 			price,
 			Config.DescribeIngredients(recipe.Ingredients)
 		)
-		if index <= state.RecipesUnlocked then
+		if index <= state.RecipesUnlocked and not state.Work then
+			-- The Treat Designer. A co-baker designs their own treats in their own bakery.
+			addRow(recipe.Name, detail, {
+				{
+					Text = "🎨 Customize",
+					Color = BLUE,
+					OnClick = function()
+						panels.treatDesigner.open(index)
+					end,
+				},
+				{ Text = "Unlocked", Color = PINK },
+			})
+		elseif index <= state.RecipesUnlocked then
 			addRow(recipe.Name, detail, { { Text = "Unlocked", Color = PINK } })
 		elseif recipe.UnlockLevel then
 			-- Learned on reaching a Bakery Level, once the recipes before it are known.
@@ -1867,6 +1889,9 @@ setPanel = function(name)
 		refreshPanel()
 	end
 	wardrobe.refresh()
+	if panels.treatDesigner then
+		panels.treatDesigner.refresh()
+	end
 end
 
 local function togglePanel(name)
@@ -3534,6 +3559,30 @@ panels.Exterior = require(script.Parent:WaitForChild("ExteriorPanel"))({
 	purchaseEvent = purchaseEvent,
 })
 
+-- The Treat Designer popup, in its own module for the same reason as ExteriorPanel.
+panels.treatDesigner = require(script.Parent:WaitForChild("TreatCustomizer"))({
+	gui = gui,
+	panel = panel,
+	colours = { PINK = PINK, BROWN = BROWN, CREAM = CREAM, GREEN = GREEN, GREY = GREY, GOLD = GOLD, BLUE = BLUE, WHITE = WHITE },
+	style = style,
+	label = label,
+	button = button,
+	myPlot = myPlot,
+	currentPanel = function()
+		return currentPanel
+	end,
+})
+-- Hotbar pictures follow a bakery's designs when they change.
+for _, plot in plotsFolder:GetChildren() do
+	plot:GetAttributeChangedSignal("DesignStamp"):Connect(function()
+		for _, entry in hotbarSlots do
+			if entry.recipeIndex ~= 0 then
+				setSlotIcon(entry, entry.recipeIndex)
+			end
+		end
+	end)
+end
+
 local SLOT_KEYS = { Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four, Enum.KeyCode.Five }
 
 UserInputService.InputBegan:Connect(function(input, processed)
@@ -3974,7 +4023,7 @@ end
 -- two small puffs trailing down to their head, sized in studs so it shrinks with distance.
 -- It lives in PlayerGui with the customer as its Adornee, because a ViewportFrame in a
 -- BillboardGui under the Workspace draws nothing.
-local function thoughtBubble(root, recipeIndex)
+local function thoughtBubble(root, recipeIndex, plotModel)
 	local bubble = Instance.new("BillboardGui")
 	bubble.Name = "Thought"
 	bubble.Size = UDim2.fromScale(3, 3)
@@ -4007,7 +4056,7 @@ local function thoughtBubble(root, recipeIndex)
 	icon.Ambient = Color3.fromRGB(200, 200, 200)
 	icon.LightColor = WHITE
 	icon.Parent = cloud
-	showTreat(icon, recipeIndex)
+	showTreat(icon, recipeIndex, plotModel)
 	bubble.Adornee = root
 	bubble.Parent = player.PlayerGui
 	return bubble
@@ -4026,7 +4075,8 @@ local function watchWants(model)
 		end
 		local recipeIndex = model:GetAttribute("Wants")
 		if recipeIndex and Config.Recipes[recipeIndex] then
-			bubble = thoughtBubble(root, recipeIndex)
+			-- The treat looks the way the bakery they're heading to has designed it.
+			bubble = thoughtBubble(root, recipeIndex, plotsFolder:FindFirstChild(model:GetAttribute("WantsPlot") or ""))
 		end
 	end
 	model:GetAttributeChangedSignal("Wants"):Connect(update)
