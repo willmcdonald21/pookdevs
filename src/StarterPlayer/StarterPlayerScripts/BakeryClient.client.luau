@@ -577,11 +577,13 @@ function panels.Shop()
 	for _, upgrade in Config.Upgrades do
 		local levelIndex = state.Levels[upgrade.Id]
 		local nextLevel = upgrade.Levels[levelIndex + 1]
-		if nextLevel then
+		if nextLevel and nextLevel.NeedLevel and state.BakeryLevel < nextLevel.NeedLevel then
+			addRow(upgrade.Name, upgrade.Describe(nextLevel), { { Text = "Level " .. nextLevel.NeedLevel, Color = GREY } })
+		elseif nextLevel then
 			local color = state.Coins >= nextLevel.Cost and GREEN or GREY
 			addRow(upgrade.Name, upgrade.Describe(nextLevel), {
 				{
-					Text = nextLevel.Cost .. " coins",
+					Text = withCommas(nextLevel.Cost) .. " coins",
 					Color = color,
 					OnClick = function()
 						purchaseEvent:FireServer("Upgrade", upgrade.Id)
@@ -622,10 +624,13 @@ function panels.Cookbook()
 		)
 		if index <= state.RecipesUnlocked then
 			addRow(recipe.Name, detail, { { Text = "Unlocked", Color = PINK } })
+		elseif recipe.UnlockLevel then
+			-- Learned on reaching a Bakery Level, once the recipes before it are known.
+			addRow(recipe.Name, detail, { { Text = "Level " .. recipe.UnlockLevel, Color = GREY } })
 		elseif index == state.RecipesUnlocked + 1 then
 			addRow(recipe.Name, detail, {
 				{
-					Text = recipe.UnlockCost .. " coins",
+					Text = withCommas(recipe.UnlockCost) .. " coins",
 					Color = state.Coins >= recipe.UnlockCost and GREEN or GREY,
 					OnClick = function()
 						purchaseEvent:FireServer("Recipe")
@@ -3491,6 +3496,16 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 
 -- State updates
+-- The Bakery Level badge, in its own module for the same reason as ExteriorPanel.
+do
+	local updateLevelBadge = require(script.Parent:WaitForChild("LevelBadge"))({
+		gui = gui,
+		colours = { BROWN = BROWN, GOLD = GOLD, WHITE = WHITE },
+		font = FONT,
+	})
+	stateEvent.OnClientEvent:Connect(updateLevelBadge)
+end
+
 stateEvent.OnClientEvent:Connect(function(newState)
 	state = newState
 	showRunning(state.Running)
@@ -3641,6 +3656,20 @@ popupEvent.OnClientEvent:Connect(function(kind, info)
 			info.Coins
 		)
 		queuePopup("Welcome back!", body, "Yay!")
+	elseif kind == "LevelUp" then
+		-- "A", "A and B", or "A, B and C".
+		local learned = table.clone(info.Learned)
+		local last = table.remove(learned)
+		local names = #learned > 0 and table.concat(learned, ", ") .. " and " .. last or last
+		local body = ("Your bakery reached level %d!\n\nYou learned to bake %s. Find %s at the oven."):format(
+			info.Level,
+			names,
+			#learned > 0 and "them" or "it"
+		)
+		if info.Max then
+			body ..= "\n\nThat's the top level. Amazing baking!"
+		end
+		queuePopup("Level up!", body, "Yay!")
 	end
 end)
 
