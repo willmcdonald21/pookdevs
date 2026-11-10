@@ -13,7 +13,7 @@ Config.Ingredients = {
 		Id = "Flour",
 		Name = "Flour",
 		Color = rgb(245, 235, 215),
-		BundlePrice = 4,
+		BundlePrice = 1,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(1.4, 1.8, 1), Y = 0.9, Color = rgb(245, 235, 215), Material = Enum.Material.Fabric },
 			{ Kind = "Box", Size = Vector3.new(1.42, 0.5, 1.02), Y = 1.1, Color = rgb(110, 175, 215) },
@@ -23,7 +23,7 @@ Config.Ingredients = {
 		Id = "Sugar",
 		Name = "Sugar",
 		Color = rgb(255, 255, 255),
-		BundlePrice = 4,
+		BundlePrice = 1,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(1.3, 1.6, 0.9), Y = 0.8, Color = rgb(255, 255, 255), Material = Enum.Material.Fabric },
 			{ Kind = "Box", Size = Vector3.new(1.32, 0.45, 0.92), Y = 1, Color = rgb(240, 150, 175) },
@@ -33,7 +33,7 @@ Config.Ingredients = {
 		Id = "Eggs",
 		Name = "Eggs",
 		Color = rgb(250, 235, 205),
-		BundlePrice = 6,
+		BundlePrice = 1,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(1.6, 0.5, 1), Y = 0.25, Color = rgb(200, 185, 165) },
 			{ Kind = "Ball", Diameter = 0.45, X = -0.4, Y = 0.6, Z = -0.2, Color = rgb(250, 235, 205) },
@@ -45,7 +45,7 @@ Config.Ingredients = {
 		Id = "Butter",
 		Name = "Butter",
 		Color = rgb(255, 220, 110),
-		BundlePrice = 6,
+		BundlePrice = 1,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(1.4, 0.15, 0.9), Y = 0.08, Color = rgb(230, 230, 235) },
 			{ Kind = "Box", Size = Vector3.new(1.1, 0.55, 0.6), Y = 0.42, Color = rgb(255, 220, 110) },
@@ -55,7 +55,7 @@ Config.Ingredients = {
 		Id = "Milk",
 		Name = "Milk",
 		Color = rgb(235, 245, 255),
-		BundlePrice = 6,
+		BundlePrice = 1,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(0.9, 1.6, 0.9), Y = 0.8, Color = rgb(240, 248, 255) },
 			{ Kind = "Box", Size = Vector3.new(0.92, 0.5, 0.92), Y = 0.9, Color = rgb(110, 175, 215) },
@@ -66,7 +66,7 @@ Config.Ingredients = {
 		Id = "Berries",
 		Name = "Berries",
 		Color = rgb(200, 40, 80),
-		BundlePrice = 8,
+		BundlePrice = 2,
 		Parts = {
 			{ Kind = "Disc", Height = 0.5, Diameter = 1.5, Y = 0.25, Color = rgb(190, 140, 90), Material = Enum.Material.WoodPlanks },
 			{ Kind = "Ball", Diameter = 0.45, X = -0.3, Y = 0.6, Color = rgb(200, 40, 80) },
@@ -101,6 +101,12 @@ Config.StartingPantry = 15
 Config.GroceryBundle = 5
 
 -- Coins for any amount of an ingredient, at its bundle's price per item, rounded up.
+-- "1 coin", "25 coins" or "1,500 coins". Many prices are 1 now, so this keeps them reading right.
+function Config.CoinText(amount)
+	local text = tostring(math.floor(amount)):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+	return text .. (amount == 1 and " coin" or " coins")
+end
+
 function Config.GroceryPrice(ingredient, amount)
 	return math.ceil(ingredient.BundlePrice * amount / Config.GroceryBundle)
 end
@@ -387,8 +393,8 @@ end
 -- instead of CheckoutTime. Players check customers out at once.
 Config.Employees = {
 	Max = 2,
-	HireCost = { 1000, 3000 },
-	TrainCost = 5000,
+	HireCost = { 200, 600 },
+	TrainCost = 1000,
 	WalkSpeed = 10,
 	TrainedWalkSpeed = 18,
 	CheckoutTime = 2.5,
@@ -607,17 +613,17 @@ end
 
 Config.Items = {
 	-- Two shelves of three, the same height as before.
-	displayCase({ Id = "SmallCase", Name = "Display Case", Coins = 100, Charm = 0 }, 2, 2.2),
+	displayCase({ Id = "SmallCase", Name = "Display Case", Coins = 20, Charm = 0 }, 2, 2.2),
 	-- Four shelves of three. It stays under 7 studs, so wall pieces hung above it still fit.
-	displayCase({ Id = "BigCase", Name = "Tall Display Case", Coins = 800, Charm = 1 }, 4, 0.9),
+	displayCase({ Id = "BigCase", Name = "Tall Display Case", Coins = 160, Charm = 1 }, 4, 0.9),
 	-- An item with Room = "Stash" only goes in The Sweet Stash, and nothing else goes there.
 	-- It's bought at the stash's whiteboard, not in the Decorate menu. Customers never shop
 	-- from it: it holds treats until the Stocker takes them to a display case.
-	stashShelf({ Id = "StashShelf", Name = "Stash Shelf", Coins = 300, Charm = 0, Room = "Stash" }),
+	stashShelf({ Id = "StashShelf", Name = "Stash Shelf", Coins = 60, Charm = 0, Room = "Stash" }),
 	{
 		Id = "Rug",
 		Name = "Cozy Rug",
-		Coins = 60,
+		Coins = 10,
 		Charm = 1,
 		Flat = true,
 		Parts = {
@@ -628,7 +634,7 @@ Config.Items = {
 	{
 		Id = "Plant",
 		Name = "Potted Plant",
-		Coins = 50,
+		Coins = 10,
 		Charm = 1,
 		Parts = {
 			{ Kind = "Disc", Height = 1.6, Diameter = 1.8, Y = 0.8, Color = rgb(200, 120, 90) },
@@ -639,7 +645,7 @@ Config.Items = {
 	{
 		Id = "Balloons",
 		Name = "Balloon Bunch",
-		Coins = 40,
+		Coins = 8,
 		Charm = 1,
 		Parts = {
 			{ Kind = "Disc", Height = 0.4, Diameter = 1.4, Y = 0.2, Color = rgb(255, 225, 200) },
@@ -652,7 +658,7 @@ Config.Items = {
 	{
 		Id = "Lamp",
 		Name = "Floor Lamp",
-		Coins = 80,
+		Coins = 15,
 		Charm = 1,
 		Parts = {
 			{ Kind = "Disc", Height = 0.3, Diameter = 2, Y = 0.15, Color = rgb(90, 60, 70) },
@@ -663,7 +669,7 @@ Config.Items = {
 	{
 		Id = "Table",
 		Name = "Cafe Table",
-		Coins = 120,
+		Coins = 25,
 		Charm = 2,
 		Seats = {
 			{ At = Vector3.new(-1.9, 1.75, 0), Look = Vector3.new(1, 0, 0), From = Vector3.new(-3.9, 0, 0) },
@@ -746,7 +752,7 @@ Config.Items = {
 		Id = "PartyBunting",
 		Name = "Party Bunting",
 		Pass = "StarterPack",
-		ExtraCoins = 150,
+		ExtraCoins = 30,
 		Charm = 3,
 		Parts = {
 			{ Kind = "Disc", Height = 5, Diameter = 0.25, X = -2.2, Y = 2.5, Color = rgb(255, 255, 255) },
@@ -762,7 +768,7 @@ Config.Items = {
 		Id = "Fireplace",
 		Name = "Fireplace",
 		Pass = "CozyPack",
-		ExtraCoins = 400,
+		ExtraCoins = 80,
 		Charm = 4,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(4.4, 3.6, 1.6), Y = 1.8, Color = rgb(170, 85, 70), Material = Enum.Material.Brick },
@@ -775,7 +781,7 @@ Config.Items = {
 		Id = "Bookshelf",
 		Name = "Bookshelf",
 		Pass = "CozyPack",
-		ExtraCoins = 300,
+		ExtraCoins = 60,
 		Charm = 4,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(3.6, 5, 1.4), Y = 2.5, Color = rgb(150, 100, 70), Material = Enum.Material.Wood },
@@ -791,7 +797,7 @@ Config.Items = {
 		Id = "Armchair",
 		Name = "Armchair",
 		Pass = "CozyPack",
-		ExtraCoins = 250,
+		ExtraCoins = 50,
 		Charm = 4,
 		Seats = { { At = Vector3.new(0, 1.85, -0.2), Look = Vector3.new(0, 0, -1), From = Vector3.new(0, 0, -2.8) } },
 		Parts = {
@@ -806,7 +812,7 @@ Config.Items = {
 		Id = "ChristmasTree",
 		Name = "Christmas Tree",
 		Pass = "WinterPack",
-		ExtraCoins = 400,
+		ExtraCoins = 80,
 		Charm = 5,
 		Parts = {
 			{ Kind = "Disc", Height = 1, Diameter = 0.8, Y = 0.5, Color = rgb(120, 80, 55) },
@@ -824,7 +830,7 @@ Config.Items = {
 		Id = "Snowman",
 		Name = "Snowman",
 		Pass = "WinterPack",
-		ExtraCoins = 300,
+		ExtraCoins = 60,
 		Charm = 5,
 		Parts = {
 			{ Kind = "Ball", Diameter = 3, Y = 1.5, Color = rgb(250, 250, 255) },
@@ -842,7 +848,7 @@ Config.Items = {
 		Id = "GingerbreadHouse",
 		Name = "Gingerbread House",
 		Pass = "WinterPack",
-		ExtraCoins = 350,
+		ExtraCoins = 70,
 		Charm = 5,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(3.6, 2.6, 3.6), Y = 1.3, Color = rgb(170, 100, 55) },
@@ -859,7 +865,7 @@ Config.Items = {
 		Id = "Sconce",
 		Name = "Wall Sconce",
 		Wall = true,
-		Coins = 70,
+		Coins = 15,
 		Charm = 1,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(0.8, 1.8, 0.2), Y = 0.9, Z = -0.1, Color = rgb(205, 160, 80), Material = Enum.Material.Metal },
@@ -888,7 +894,7 @@ Config.Items = {
 		Id = "HangingIvy",
 		Name = "Hanging Ivy",
 		Wall = true,
-		Coins = 60,
+		Coins = 10,
 		Charm = 1,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(0.5, 0.5, 0.1), Y = 4, Z = -0.05, Color = rgb(70, 60, 60), Material = Enum.Material.Metal },
@@ -909,7 +915,7 @@ Config.Items = {
 		Id = "WallPlanter",
 		Name = "Wall Planter",
 		Wall = true,
-		Coins = 80,
+		Coins = 15,
 		Charm = 2,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(3.6, 0.9, 1), Y = 1.25, Z = -0.5, Color = rgb(190, 130, 95), Material = Enum.Material.WoodPlanks },
@@ -930,7 +936,7 @@ Config.Items = {
 		Id = "CupcakePainting",
 		Name = "Cupcake Painting",
 		Wall = true,
-		Coins = 90,
+		Coins = 20,
 		Charm = 2,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(3.2, 3.8, 0.2), Y = 1.9, Z = -0.1, Color = rgb(255, 200, 70), Material = Enum.Material.Foil },
@@ -949,7 +955,7 @@ Config.Items = {
 		Id = "SunsetPainting",
 		Name = "Sunset Painting",
 		Wall = true,
-		Coins = 110,
+		Coins = 20,
 		Charm = 2,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(4.6, 3.2, 0.2), Y = 1.6, Z = -0.1, Color = rgb(150, 100, 70), Material = Enum.Material.Wood },
@@ -966,7 +972,7 @@ Config.Items = {
 		Id = "WallClock",
 		Name = "Wall Clock",
 		Wall = true,
-		Coins = 80,
+		Coins = 15,
 		Charm = 1,
 		Parts = {
 			{ Kind = "Plate", Height = 0.25, Diameter = 2.6, Y = 1.3, Z = -0.125, Color = rgb(240, 150, 175) },
@@ -984,7 +990,7 @@ Config.Items = {
 		Id = "Chalkboard",
 		Name = "Chalkboard Menu",
 		Wall = true,
-		Coins = 100,
+		Coins = 20,
 		Charm = 2,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(3.6, 4.4, 0.2), Y = 2.2, Z = -0.1, Color = rgb(150, 100, 70), Material = Enum.Material.Wood },
@@ -1181,29 +1187,29 @@ local function goldenBedParts()
 end
 
 for _, plant in {
-	{ Id = "FlowerPatch", Name = "Flower Patch", Coins = 400, Charm = 2, Parts = flowerPatchParts() },
-	{ Id = "TulipRow", Name = "Tulip Row", Coins = 600, Charm = 2, Parts = tulipRowParts() },
-	{ Id = "RoundBush", Name = "Round Bush", Coins = 750, Charm = 2, Parts = bushParts(false) },
-	{ Id = "FloweringBush", Name = "Flowering Bush", Coins = 1000, Charm = 3, Parts = bushParts(true) },
+	{ Id = "FlowerPatch", Name = "Flower Patch", Coins = 80, Charm = 2, Parts = flowerPatchParts() },
+	{ Id = "TulipRow", Name = "Tulip Row", Coins = 120, Charm = 2, Parts = tulipRowParts() },
+	{ Id = "RoundBush", Name = "Round Bush", Coins = 150, Charm = 2, Parts = bushParts(false) },
+	{ Id = "FloweringBush", Name = "Flowering Bush", Coins = 200, Charm = 3, Parts = bushParts(true) },
 	{
 		Id = "PottedTopiary",
 		Name = "Potted Topiary",
-		Coins = 1200,
+		Coins = 240,
 		Charm = 3,
 		Parts = pottedParts({ leafBall(0, 3.1, 0, 1.6, LEAVES[2], 1), leafBall(0, 5.1, 0, 2.6, LEAVES[1], 1) }),
 	},
 	{
 		Id = "BoxHedge",
 		Name = "Box Hedge",
-		Coins = 1500,
+		Coins = 300,
 		Charm = 3,
 		Parts = {
 			{ Kind = "Box", Size = Vector3.new(6, 2.6, 1.8), Y = 1.3, Color = LEAVES[2], Material = LEAFY },
 			{ Kind = "Box", Size = Vector3.new(5.8, 0.3, 1.6), Y = 2.7, Color = LEAVES[1], Material = LEAFY },
 		},
 	},
-	{ Id = "LittleTree", Name = "Little Green Tree", Coins = 2000, Charm = 4, Parts = littleTreeParts() },
-	{ Id = "RoseArch", Name = "Rose Arch", Coins = 2500, Charm = 4, Parts = roseArchParts() },
+	{ Id = "LittleTree", Name = "Little Green Tree", Coins = 400, Charm = 4, Parts = littleTreeParts() },
+	{ Id = "RoseArch", Name = "Rose Arch", Coins = 500, Charm = 4, Parts = roseArchParts() },
 	{ Id = "HeartTopiary", Name = "Heart Topiary", Stars = 20, Charm = 10, Parts = heartParts() },
 	{ Id = "CherryTree", Name = "Cherry Blossom Tree", Stars = 30, Charm = 12, Parts = cherryParts() },
 	{ Id = "GoldenBed", Name = "Golden Flower Bed", Stars = 40, Charm = 15, Sparkles = true, Parts = goldenBedParts() },
@@ -1247,7 +1253,7 @@ Config.Passes = {
 		Name = "Starter Pack",
 		GamePassId = 2068562637,
 		Section = "Packs",
-		Detail = "1,000 coins, 15 Sugar Stars and Party Bunting",
+		Detail = "200 coins, 15 Sugar Stars and Party Bunting",
 	},
 	{
 		Id = "CozyPack",
@@ -1306,7 +1312,7 @@ Config.FreePasses = {
 	[7358315834] = { "VIP", "StarterPack", "CozyPack", "WinterPack" }, -- lullabybbys
 }
 
-Config.StarterPack = { Coins = 1000, Stars = 15 }
+Config.StarterPack = { Coins = 200, Stars = 15 }
 
 -- Each box holds one kind of treat, so keep this at or above the number of recipes.
 Config.HotbarSize = 5
@@ -1318,7 +1324,7 @@ Config.StarterCase = { Key = "starter", Item = "SmallCase", X = 36, Z = 27, R = 
 -- times are multiplied by BakeTimeScale, so 0.85 bakes 15% faster than the normal oven.
 Config.LuxuryOven = {
 	Name = "Luxury Oven",
-	Coins = 25000,
+	Coins = 5000,
 	BakeTimeScale = 0.85,
 	Detail = "A gold second oven that bakes 15% faster. Bake two batches at once!",
 }
@@ -1329,7 +1335,7 @@ Config.LuxuryOven = {
 -- brings them out when a case has room.
 Config.Stash = {
 	Name = "The Sweet Stash",
-	Coins = 5000,
+	Coins = 1000,
 	Detail = "A storage room through a back door. The Stocker keeps extra treats on its shelves until your cases have room",
 }
 
@@ -1342,8 +1348,8 @@ Config.Exterior = {
 	NameLength = 24,
 	RenameSeconds = 2,
 	Parts = {
-		{ Id = "Primary", Name = "Walls", Detail = "The outside of your bakery", Coins = 100 },
-		{ Id = "Secondary", Name = "Trim", Detail = "The edge along the top and the sign board", Coins = 50 },
+		{ Id = "Primary", Name = "Walls", Detail = "The outside of your bakery", Coins = 20 },
+		{ Id = "Secondary", Name = "Trim", Detail = "The edge along the top and the sign board", Coins = 10 },
 	},
 }
 
@@ -1359,7 +1365,7 @@ end
 -- A yard around the bakery for garden plants, bought once in the sign's popup.
 Config.Garden = {
 	Name = "Garden",
-	Coins = 8000,
+	Coins = 1600,
 	Detail = "A yard around your bakery for luxury bushes, trees and flowers",
 }
 
@@ -1367,9 +1373,9 @@ Config.Garden = {
 -- the back wall Back studs further back and each side wall Side studs further out. The
 -- front, with the door and sign, stays put.
 Config.Expansions = {
-	{ Coins = 3000, Back = 8, Side = 2 },
-	{ Coins = 8000, Back = 8, Side = 2 },
-	{ Coins = 18000, Back = 8, Side = 2 },
+	{ Coins = 600, Back = 8, Side = 2 },
+	{ Coins = 1600, Back = 8, Side = 2 },
+	{ Coins = 3600, Back = 8, Side = 2 },
 }
 
 -- Paint for the walls, the oven and each paintable piece, like a display case, bought in
@@ -1377,9 +1383,9 @@ Config.Expansions = {
 -- Anything can use any colour, except that the oven can't use colours with Oven = false.
 -- The oven gets no yellow or shiny paint, so only the Luxury Oven ever looks gold, and the
 -- Luxury Oven can't be painted.
-Config.WallPaintCoins = 25
-Config.OvenPaintCoins = 75
-Config.PiecePaintCoins = 15
+Config.WallPaintCoins = 5
+Config.OvenPaintCoins = 15
+Config.PiecePaintCoins = 3
 -- Paintable pieces start in this colour, unless they give their own OriginalPaint.
 Config.PieceOriginalPaint = "Bubblegum"
 Config.Paints = {
@@ -1462,27 +1468,27 @@ end
 Config.FloorFill = { ConfirmSeconds = 3 }
 Config.Floors = {
 	{ Id = "Original", Name = "Cream Planks", Coins = 0, Material = Enum.Material.WoodPlanks, Color = rgb(245, 226, 200) },
-	{ Id = "Oak", Name = "Oak Planks", Coins = 6, Material = Enum.Material.WoodPlanks, Color = rgb(205, 155, 105) },
-	{ Id = "Walnut", Name = "Walnut Planks", Coins = 6, Material = Enum.Material.WoodPlanks, Color = rgb(120, 80, 55) },
-	{ Id = "Cherry", Name = "Cherry Planks", Coins = 6, Material = Enum.Material.WoodPlanks, Color = rgb(170, 90, 70) },
-	{ Id = "WhiteMarble", Name = "White Marble", Coins = 8, Material = Enum.Material.Marble, Color = rgb(245, 245, 248) },
-	{ Id = "PinkMarble", Name = "Pink Marble", Coins = 8, Material = Enum.Material.Marble, Color = rgb(250, 205, 215) },
-	{ Id = "Slate", Name = "Grey Slate", Coins = 8, Material = Enum.Material.Slate, Color = rgb(125, 125, 135) },
-	{ Id = "PinkTiles", Name = "Pink Tiles", Coins = 5, Material = Enum.Material.CeramicTiles, Color = rgb(255, 190, 205) },
-	{ Id = "MintTiles", Name = "Mint Tiles", Coins = 5, Material = Enum.Material.CeramicTiles, Color = rgb(175, 225, 205) },
-	{ Id = "SkyTiles", Name = "Sky Tiles", Coins = 5, Material = Enum.Material.CeramicTiles, Color = rgb(185, 220, 245) },
-	{ Id = "LemonTiles", Name = "Lemon Tiles", Coins = 5, Material = Enum.Material.CeramicTiles, Color = rgb(255, 240, 170) },
+	{ Id = "Oak", Name = "Oak Planks", Coins = 1, Material = Enum.Material.WoodPlanks, Color = rgb(205, 155, 105) },
+	{ Id = "Walnut", Name = "Walnut Planks", Coins = 1, Material = Enum.Material.WoodPlanks, Color = rgb(120, 80, 55) },
+	{ Id = "Cherry", Name = "Cherry Planks", Coins = 1, Material = Enum.Material.WoodPlanks, Color = rgb(170, 90, 70) },
+	{ Id = "WhiteMarble", Name = "White Marble", Coins = 2, Material = Enum.Material.Marble, Color = rgb(245, 245, 248) },
+	{ Id = "PinkMarble", Name = "Pink Marble", Coins = 2, Material = Enum.Material.Marble, Color = rgb(250, 205, 215) },
+	{ Id = "Slate", Name = "Grey Slate", Coins = 2, Material = Enum.Material.Slate, Color = rgb(125, 125, 135) },
+	{ Id = "PinkTiles", Name = "Pink Tiles", Coins = 1, Material = Enum.Material.CeramicTiles, Color = rgb(255, 190, 205) },
+	{ Id = "MintTiles", Name = "Mint Tiles", Coins = 1, Material = Enum.Material.CeramicTiles, Color = rgb(175, 225, 205) },
+	{ Id = "SkyTiles", Name = "Sky Tiles", Coins = 1, Material = Enum.Material.CeramicTiles, Color = rgb(185, 220, 245) },
+	{ Id = "LemonTiles", Name = "Lemon Tiles", Coins = 1, Material = Enum.Material.CeramicTiles, Color = rgb(255, 240, 170) },
 	{
 		Id = "LavenderTiles",
 		Name = "Lavender Tiles",
-		Coins = 5,
+		Coins = 1,
 		Material = Enum.Material.CeramicTiles,
 		Color = rgb(215, 200, 240),
 	},
 	{
 		Id = "BlackCheck",
 		Name = "Black & White Check",
-		Coins = 10,
+		Coins = 2,
 		Material = Enum.Material.SmoothPlastic,
 		Color = rgb(45, 40, 50),
 		Check = rgb(250, 250, 250),
@@ -1490,7 +1496,7 @@ Config.Floors = {
 	{
 		Id = "PinkCheck",
 		Name = "Pink & White Check",
-		Coins = 10,
+		Coins = 2,
 		Material = Enum.Material.SmoothPlastic,
 		Color = rgb(240, 150, 175),
 		Check = rgb(250, 250, 250),
@@ -1526,9 +1532,9 @@ Config.NewOrderStars = 1
 -- Packs bought with Robux. ProductId comes from Creator Hub, and 0 means it isn't
 -- on sale yet. Prices are set in Creator Hub, and the store reads them from Roblox.
 Config.Products = {
-	{ Name = "Coin Bag", ProductId = 3728575847, Currency = "Coins", Amount = 500 },
-	{ Name = "Coin Sack", ProductId = 3728575849, Currency = "Coins", Amount = 2000 },
-	{ Name = "Coin Chest", ProductId = 3728575852, Currency = "Coins", Amount = 6000 },
+	{ Name = "Coin Bag", ProductId = 3728575847, Currency = "Coins", Amount = 100 },
+	{ Name = "Coin Sack", ProductId = 3728575849, Currency = "Coins", Amount = 400 },
+	{ Name = "Coin Chest", ProductId = 3728575852, Currency = "Coins", Amount = 1200 },
 	{ Name = "Star Pouch", ProductId = 3728575854, Currency = "Stars", Amount = 10 },
 	{ Name = "Star Jar", ProductId = 3728575857, Currency = "Stars", Amount = 30 },
 	{ Name = "Star Chest", ProductId = 3728575858, Currency = "Stars", Amount = 100 },
@@ -1538,12 +1544,12 @@ Config.Products = {
 
 -- Daily reward streak (each day starts at midnight US Eastern time). Missing a day starts again at day 1.
 Config.DailyRewards = {
+	{ Coins = 20 },
+	{ Coins = 40 },
+	{ Coins = 60 },
+	{ Coins = 80 },
 	{ Coins = 100 },
-	{ Coins = 200 },
-	{ Coins = 300 },
-	{ Coins = 400 },
-	{ Coins = 500 },
-	{ Coins = 600 },
+	{ Coins = 120 },
 	{ Stars = 5 },
 }
 Config.VipDailyStars = 1
