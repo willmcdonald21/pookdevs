@@ -454,7 +454,8 @@ end
 -- in, instead of the player's own state.
 local function salePrice(recipe, source)
 	local bonus = Config.GetUpgrade("Ingredients").Levels[(source or state).Levels.Ingredients].PriceBonus
-	return math.floor(recipe.Price * (1 + bonus))
+	-- Rounded to the nearest coin, as the server does.
+	return math.floor(recipe.Price * (1 + bonus) + 0.5)
 end
 
 -- Boosts. Their times count down here from the server's clock.
@@ -831,7 +832,7 @@ do
 				local price = Config.GroceryPrice(ingredient, amount)
 				local actions = {
 					{
-						Text = price .. " coins",
+						Text = Config.CoinText(price),
 						Color = state.Coins >= price and GREEN or GREY,
 						OnClick = function()
 							buyGroceriesEvent:FireServer(ingredient.Id)
@@ -842,7 +843,7 @@ do
 				if space > Config.GroceryBundle then
 					local fillPrice = Config.GroceryPrice(ingredient, space)
 					table.insert(actions, {
-						Text = ("x%d\n%d coins"):format(space, fillPrice),
+						Text = ("x%d\n%s"):format(space, Config.CoinText(fillPrice)),
 						Color = state.Coins >= fillPrice and GREEN or GREY,
 						OnClick = function()
 							buyGroceriesEvent:FireServer(ingredient.Id, "Fill")
@@ -867,7 +868,7 @@ function panels.Bake()
 	for index = 1, work.RecipesUnlocked do
 		local recipe = Config.Recipes[index]
 		local title =
-			("%s: %d in %.1fs, %d coins each"):format(recipe.Name, batch, ovenTime * recipe.BakeScale, (customerPrice(recipe, work)))
+			("%s: %d in %.1fs, %s each"):format(recipe.Name, batch, ovenTime * recipe.BakeScale, Config.CoinText((customerPrice(recipe, work))))
 		local counts, short = ingredientCounts(recipe, work)
 		local action = short and { Text = "Need more", Color = GREY }
 			or {
@@ -1025,10 +1026,10 @@ local function paintRows()
 		for _, style in Config.Floors do
 			local free = style.Coins == 0
 			local detail = free and "Your bakery's own floor. Takes tiles up for free"
-				or ("%d coins a tile%s"):format(style.Coins, style.Check and ", in a checkerboard" or "")
+				or ("%s a tile%s"):format(Config.CoinText(style.Coins), style.Check and ", in a checkerboard" or "")
 			addRow(style.Name, detail, {
 				{
-					Text = free and "Free" or (style.Coins .. " coins"),
+					Text = free and "Free" or Config.CoinText(style.Coins),
 					Color = style.Color,
 					TextColor = textOn(style.Color),
 					OnClick = function()
@@ -3023,7 +3024,7 @@ function tiling.refresh()
 		placeBanner.BackgroundColor3 = GOLD
 	elseif os.clock() >= bannerHintUntil then
 		placeBanner.Text = free and "Tap or drag across tiles to take them up"
-			or ("Laying %s, %d coins a tile. Tap or drag across your floor"):format(style.Name, style.Coins)
+			or ("Laying %s, %s a tile. Tap or drag across your floor"):format(style.Name, Config.CoinText(style.Coins))
 		placeBanner.BackgroundColor3 = GREEN
 	end
 end
