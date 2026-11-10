@@ -378,6 +378,16 @@ local function clean(saved)
 		-- typed, and is filtered before anyone sees it.
 		Employees = cleanEmployees(saved),
 	}
+	-- The Bakery Level and the XP earned toward the next one (see Config.BakeryLevel). Saves
+	-- from before levels start at the level matching the recipes they had.
+	local levels = Config.BakeryLevel
+	if saved.BakeryLevel == nil then
+		data.BakeryLevel = math.min(data.RecipesUnlocked, levels.Max)
+	else
+		data.BakeryLevel = cleanLevel(saved.BakeryLevel, levels.Max)
+	end
+	local needed = levels.Xp[data.BakeryLevel]
+	data.BakeryXp = needed and math.min(cleanCount(saved.BakeryXp), needed - 1) or 0
 	-- The Baker helper re-bakes this recipe. 0 means nothing has been baked yet.
 	data.LastRecipe = math.min(cleanCount(saved.LastRecipe), data.RecipesUnlocked)
 	if type(saved.Receipts) == "table" then
