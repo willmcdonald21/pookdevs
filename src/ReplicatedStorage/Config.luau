@@ -112,7 +112,7 @@ Config.Crate = { Interval = 90, Size = 12 }
 Config.Recipes = {
 	{
 		Name = "Cookie",
-		Price = 4,
+		Price = 1,
 		BakeScale = 1,
 		UnlockCost = 0,
 		Ingredients = { Flour = 1, Sugar = 1, Butter = 1 },
@@ -124,9 +124,9 @@ Config.Recipes = {
 	},
 	{
 		Name = "Cupcake",
-		Price = 8,
-		BakeScale = 1.3,
-		UnlockCost = 100,
+		Price = 2,
+		BakeScale = 1.5,
+		UnlockCost = 25,
 		Ingredients = { Flour = 1, Sugar = 1, Eggs = 1, Milk = 1 },
 		Parts = {
 			{ Kind = "Disc", Height = 0.8, Diameter = 1.5, Y = 0, Color = rgb(190, 130, 75) },
@@ -136,9 +136,9 @@ Config.Recipes = {
 	},
 	{
 		Name = "Donut",
-		Price = 18,
-		BakeScale = 1.6,
-		UnlockCost = 500,
+		Price = 4,
+		BakeScale = 2,
+		UnlockCost = 100,
 		Ingredients = { Flour = 2, Sugar = 1, Eggs = 1, Milk = 1 },
 		Parts = {
 			{ Kind = "Disc", Height = 0.6, Diameter = 2, Y = 0, Color = rgb(215, 160, 95) },
@@ -148,9 +148,9 @@ Config.Recipes = {
 	},
 	{
 		Name = "Pie",
-		Price = 35,
-		BakeScale = 2,
-		UnlockCost = 2500,
+		Price = 6,
+		BakeScale = 2.6,
+		UnlockCost = 400,
 		Ingredients = { Flour = 2, Butter = 1, Berries = 2 },
 		Parts = {
 			{ Kind = "Disc", Height = 0.6, Diameter = 2.4, Y = 0, Color = rgb(225, 175, 110) },
@@ -159,9 +159,9 @@ Config.Recipes = {
 	},
 	{
 		Name = "Birthday Cake",
-		Price = 70,
-		BakeScale = 2.5,
-		UnlockCost = 10000,
+		Price = 9,
+		BakeScale = 3.2,
+		UnlockCost = 1500,
 		Ingredients = { Flour = 2, Sugar = 2, Eggs = 2, Butter = 1, Milk = 1 },
 		Parts = {
 			{ Kind = "Disc", Height = 0.9, Diameter = 2.4, Y = 0, Color = rgb(255, 180, 205) },
@@ -173,8 +173,8 @@ Config.Recipes = {
 	-- The rest are learned at a Bakery Level instead of bought (see Config.BakeryLevel).
 	{
 		Name = "Croissant",
-		Price = 110,
-		BakeScale = 2.8,
+		Price = 13,
+		BakeScale = 4,
 		UnlockLevel = 6,
 		Ingredients = { Flour = 2, Butter = 2, Milk = 1 },
 		Parts = {
@@ -187,8 +187,8 @@ Config.Recipes = {
 	},
 	{
 		Name = "Cinnamon Roll",
-		Price = 160,
-		BakeScale = 3.1,
+		Price = 18,
+		BakeScale = 4.8,
 		UnlockLevel = 7,
 		Ingredients = { Flour = 2, Sugar = 2, Butter = 1 },
 		Parts = {
@@ -199,8 +199,8 @@ Config.Recipes = {
 	},
 	{
 		Name = "Macaron",
-		Price = 230,
-		BakeScale = 3.4,
+		Price = 25,
+		BakeScale = 5.6,
 		UnlockLevel = 8,
 		Ingredients = { Sugar = 2, Eggs = 2, Berries = 1 },
 		Parts = {
@@ -211,8 +211,8 @@ Config.Recipes = {
 	},
 	{
 		Name = "Éclair",
-		Price = 320,
-		BakeScale = 3.7,
+		Price = 35,
+		BakeScale = 6.5,
 		UnlockLevel = 10,
 		Ingredients = { Flour = 2, Eggs = 2, Milk = 1, Sugar = 1 },
 		Parts = {
@@ -222,8 +222,8 @@ Config.Recipes = {
 	},
 	{
 		Name = "Cheesecake",
-		Price = 440,
-		BakeScale = 4,
+		Price = 50,
+		BakeScale = 7.5,
 		UnlockLevel = 12,
 		Ingredients = { Milk = 2, Eggs = 2, Sugar = 1, Butter = 2 },
 		Parts = {
@@ -234,8 +234,8 @@ Config.Recipes = {
 	},
 	{
 		Name = "Strawberry Shortcake",
-		Price = 600,
-		BakeScale = 4.4,
+		Price = 70,
+		BakeScale = 8.7,
 		UnlockLevel = 13,
 		Ingredients = { Flour = 2, Eggs = 2, Berries = 2, Milk = 1, Sugar = 1 },
 		Parts = {
@@ -251,8 +251,8 @@ Config.Recipes = {
 	},
 	{
 		Name = "Wedding Cake",
-		Price = 850,
-		BakeScale = 5,
+		Price = 100,
+		BakeScale = 10,
 		UnlockLevel = 15,
 		Ingredients = { Flour = 3, Sugar = 3, Eggs = 3, Butter = 2, Milk = 2, Berries = 1 },
 		Parts = {
@@ -272,7 +272,7 @@ Config.Recipes = {
 -- learned on reaching it, once the recipes before them are known. Starting levels for saves
 -- from before levels existed: a save that had N recipes starts at level N.
 Config.BakeryLevel = {
-	Xp = { 200, 500, 1000, 2000, 4000, 8000, 14000, 24000, 36000, 52000, 72000, 98000, 130000, 170000 },
+	Xp = { 50, 120, 220, 400, 700, 1200, 2000, 3200, 4800, 6800, 9000, 12000, 16000, 20000 },
 }
 Config.BakeryLevel.Max = #Config.BakeryLevel.Xp + 1
 
@@ -288,13 +288,13 @@ Config.Upgrades = {
 		Name = "Faster Oven",
 		Levels = {
 			{ BakeTime = 5 },
-			{ BakeTime = 3.5, Cost = 25 },
-			{ BakeTime = 2.5, Cost = 150 },
-			{ BakeTime = 1.5, Cost = 800 },
-			{ BakeTime = 1.2, Cost = 15000, NeedLevel = 6 },
-			{ BakeTime = 1, Cost = 40000, NeedLevel = 9 },
-			{ BakeTime = 0.8, Cost = 100000, NeedLevel = 12 },
-			{ BakeTime = 0.6, Cost = 250000, NeedLevel = 14 },
+			{ BakeTime = 3.5, Cost = 5 },
+			{ BakeTime = 2.5, Cost = 30 },
+			{ BakeTime = 1.5, Cost = 160 },
+			{ BakeTime = 1.2, Cost = 2000, NeedLevel = 6 },
+			{ BakeTime = 1, Cost = 5000, NeedLevel = 9 },
+			{ BakeTime = 0.8, Cost = 12000, NeedLevel = 12 },
+			{ BakeTime = 0.6, Cost = 30000, NeedLevel = 14 },
 		},
 		Describe = function(level)
 			return ("Cookies bake in %s seconds"):format(level.BakeTime)
@@ -305,13 +305,13 @@ Config.Upgrades = {
 		Name = "Bigger Batches",
 		Levels = {
 			{ BatchSize = 2 },
-			{ BatchSize = 3, Cost = 50 },
-			{ BatchSize = 4, Cost = 400 },
-			{ BatchSize = 6, Cost = 2000 },
-			{ BatchSize = 8, Cost = 20000, NeedLevel = 6 },
-			{ BatchSize = 10, Cost = 50000, NeedLevel = 9 },
-			{ BatchSize = 12, Cost = 120000, NeedLevel = 12 },
-			{ BatchSize = 15, Cost = 300000, NeedLevel = 14 },
+			{ BatchSize = 3, Cost = 10 },
+			{ BatchSize = 4, Cost = 80 },
+			{ BatchSize = 6, Cost = 400 },
+			{ BatchSize = 8, Cost = 2500, NeedLevel = 6 },
+			{ BatchSize = 10, Cost = 6000, NeedLevel = 9 },
+			{ BatchSize = 12, Cost = 15000, NeedLevel = 12 },
+			{ BatchSize = 15, Cost = 36000, NeedLevel = 14 },
 		},
 		Describe = function(level)
 			return ("Bake %d treats at a time"):format(level.BatchSize)
@@ -322,13 +322,13 @@ Config.Upgrades = {
 		Name = "Bigger Tray",
 		Levels = {
 			{ Capacity = 8 },
-			{ Capacity = 12, Cost = 40 },
-			{ Capacity = 16, Cost = 250 },
-			{ Capacity = 24, Cost = 1200 },
-			{ Capacity = 32, Cost = 12000, NeedLevel = 6 },
-			{ Capacity = 40, Cost = 30000, NeedLevel = 9 },
-			{ Capacity = 50, Cost = 80000, NeedLevel = 12 },
-			{ Capacity = 60, Cost = 200000, NeedLevel = 14 },
+			{ Capacity = 12, Cost = 8 },
+			{ Capacity = 16, Cost = 50 },
+			{ Capacity = 24, Cost = 240 },
+			{ Capacity = 32, Cost = 1500, NeedLevel = 6 },
+			{ Capacity = 40, Cost = 4000, NeedLevel = 9 },
+			{ Capacity = 50, Cost = 10000, NeedLevel = 12 },
+			{ Capacity = 60, Cost = 25000, NeedLevel = 14 },
 		},
 		Describe = function(level)
 			return ("Carry %d treats"):format(level.Capacity)
@@ -339,13 +339,13 @@ Config.Upgrades = {
 		Name = "Bigger Pantry",
 		Levels = {
 			{ Capacity = 30 },
-			{ Capacity = 50, Cost = 150 },
-			{ Capacity = 80, Cost = 800 },
-			{ Capacity = 120, Cost = 3000 },
-			{ Capacity = 160, Cost = 10000, NeedLevel = 6 },
-			{ Capacity = 200, Cost = 25000, NeedLevel = 9 },
-			{ Capacity = 250, Cost = 60000, NeedLevel = 12 },
-			{ Capacity = 300, Cost = 150000, NeedLevel = 14 },
+			{ Capacity = 50, Cost = 30 },
+			{ Capacity = 80, Cost = 160 },
+			{ Capacity = 120, Cost = 600 },
+			{ Capacity = 160, Cost = 1200, NeedLevel = 6 },
+			{ Capacity = 200, Cost = 3000, NeedLevel = 9 },
+			{ Capacity = 250, Cost = 7500, NeedLevel = 12 },
+			{ Capacity = 300, Cost = 18000, NeedLevel = 14 },
 		},
 		Describe = function(level)
 			return ("Store %d of each ingredient"):format(level.Capacity)
@@ -356,13 +356,13 @@ Config.Upgrades = {
 		Name = "Better Ingredients",
 		Levels = {
 			{ PriceBonus = 0 },
-			{ PriceBonus = 0.25, Cost = 200 },
-			{ PriceBonus = 0.5, Cost = 1500 },
-			{ PriceBonus = 1, Cost = 6000 },
-			{ PriceBonus = 1.25, Cost = 25000, NeedLevel = 6 },
-			{ PriceBonus = 1.5, Cost = 60000, NeedLevel = 9 },
-			{ PriceBonus = 2, Cost = 150000, NeedLevel = 12 },
-			{ PriceBonus = 2.5, Cost = 400000, NeedLevel = 14 },
+			{ PriceBonus = 0.25, Cost = 40 },
+			{ PriceBonus = 0.5, Cost = 300 },
+			{ PriceBonus = 1, Cost = 1200 },
+			{ PriceBonus = 1.25, Cost = 3000, NeedLevel = 6 },
+			{ PriceBonus = 1.5, Cost = 7500, NeedLevel = 9 },
+			{ PriceBonus = 2, Cost = 18000, NeedLevel = 12 },
+			{ PriceBonus = 2.5, Cost = 48000, NeedLevel = 14 },
 		},
 		Describe = function(level)
 			return ("Everything sells for %d%% more"):format(level.PriceBonus * 100)
