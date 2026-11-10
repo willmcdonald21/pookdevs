@@ -4,7 +4,6 @@
 -- Active attribute and the plot's OwnerId. Prompts with the CoBake attribute also show
 -- for the bakery's co-bakers.
 local CollectionService = game:GetService("CollectionService")
-local PathfindingService = game:GetService("PathfindingService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -16,6 +15,7 @@ local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local ItemBuilder = require(ReplicatedStorage:WaitForChild("ItemBuilder"))
 local Layout = require(ReplicatedStorage:WaitForChild("Layout"))
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
+local TreatDesign = require(ReplicatedStorage:WaitForChild("TreatDesign"))
 local PurchaseHandler = require(ServerScriptService:WaitForChild("PurchaseHandler"))
 
 local REACH_BUFFER = 8
@@ -515,7 +515,12 @@ local function updateCarriedTray(player, data)
 		carriedTrays[player] = tray
 	end
 
-	local showing = trayTreat(player)
+	-- The treat looks the way the bakery being worked in has designed it. Showing changes
+	-- when the treat or that bakery's designs do.
+	local recipeIndex = trayTreat(player)
+	local plot = workPlot(player)
+	local host = plot and plot.owner and PlayerData.Get(plot.owner) or data
+	local showing = recipeIndex and ("%d:%d"):format(recipeIndex, plot and plot.model:GetAttribute("DesignStamp") or 0)
 	if tray:GetAttribute("Showing") == showing then
 		return
 	end
@@ -524,9 +529,10 @@ local function updateCarriedTray(player, data)
 	if old then
 		old:Destroy()
 	end
-	if showing then
-		local treat = ItemBuilder.Build(
-			Config.Recipes[showing],
+	if recipeIndex then
+		local treat = TreatDesign.Build(
+			recipeIndex,
+			TreatDesign.For(host.TreatDesigns, recipeIndex),
 			TRAY_ITEM_SCALE,
 			tray.CFrame * CFrame.new(0, tray.Size.Y / 2 + 0.1, 0)
 		)
@@ -1162,8 +1168,9 @@ local function refreshCase(plot, data, key)
 	case.items:ClearAllChildren()
 	local stock = data.Stock[key]
 	for slot, recipeIndex in stock do
-		local item = ItemBuilder.Build(
-			Config.Recipes[recipeIndex],
+		local item = TreatDesign.Build(
+			recipeIndex,
+			TreatDesign.For(data.TreatDesigns, recipeIndex),
 			SLOT_ITEM_SCALE,
 			case.origin * CFrame.new(case.slots[slot])
 		)
@@ -2791,7 +2798,8 @@ local function walkAround(model, to, speed, outside, stop)
 	local function stopped()
 		return not model.Parent or (stop ~= nil and stop())
 	end
-	local path = PathfindingService:CreatePath(PATH_SETTINGS)
+	-- PathfindingService isn't a top-level local: this script is at Luau's 200-local limit.
+	local path = game:GetService("PathfindingService"):CreatePath(PATH_SETTINGS)
 	local ok = pcall(function()
 		path:ComputeAsync(model.PrimaryPart.Position - PATH_GROUND, to - PATH_GROUND)
 	end)
@@ -3212,6 +3220,8 @@ local function visitBakery(person)
 	local door = plot.door.Position + Vector3.new(0, 3, 0)
 	local data = PlayerData.Get(plot.owner)
 	person.wants = math.random(data and data.RecipesUnlocked or 1)
+	-- WantsPlot tells clients whose design to show in the bubble.
+	model:SetAttribute("WantsPlot", plot.model.Name)
 	model:SetAttribute("Wants", person.wants)
 	walkAround(model, plot.mouth, person.speed, true)
 	if plot.session == session then
@@ -4137,8 +4147,9 @@ local function firstOven(plot, data, state)
 	return nil
 end
 
--- The Stocker holds the treats they're carrying on a tray, like the one you carry.
-local function setHelperTray(model, recipeIndex)
+-- The Stocker holds the treats they're carrying on a tray, like the one you carry, in the
+-- bakery's design for that treat (or nil for its own look).
+local function setHelperTray(model, recipeIndex, design)
 	local old = model:FindFirstChild("CarriedTray")
 	if old then
 		old:Destroy()
@@ -4156,11 +4167,12 @@ local function setHelperTray(model, recipeIndex)
 	tray.CanTouch = false
 	tray.Massless = true
 	tray.CFrame = root.CFrame * CFrame.new(0, 0.2, -1.6)
+	tray:SetAttribute("Recipe", recipeIndex)
 	local weld = Instance.new("WeldConstraint")
 	weld.Part0 = root
 	weld.Part1 = tray
 	weld.Parent = tray
-	local treat = ItemBuilder.Build(Config.Recipes[recipeIndex], TRAY_ITEM_SCALE, tray.CFrame * CFrame.new(0, tray.Size.Y / 2 + 0.1, 0))
+	local treat = TreatDesign.Build(recipeIndex, design, TRAY_ITEM_SCALE, tray.CFrame * CFrame.new(0, tray.Size.Y / 2 + 0.1, 0))
 	local treatWeld = Instance.new("WeldConstraint")
 	treatWeld.Part0 = tray
 	treatWeld.Part1 = treat.PrimaryPart
@@ -4333,7 +4345,7 @@ local function runEmployee(plot, session, player, slot)
 						else
 							oven.prompt.ActionText = ("Collect %d %s"):format(oven.count, oven.recipe.Name)
 						end
-						setHelperTray(model, carrying.Recipe)
+						setHelperTray(model, carrying.Recipe, TreatDesign.For(data.TreatDesigns, carrying.Recipe))
 						syncStats(player)
 					end
 				elseif shelf then
@@ -4353,7 +4365,7 @@ local function runEmployee(plot, session, player, slot)
 					end
 					if take > 0 then
 						carrying = { Recipe = shelfRecipe, Count = take }
-						setHelperTray(model, shelfRecipe)
+						setHelperTray(model, shelfRecipe, TreatDesign.For(data.TreatDesigns, shelfRecipe))
 						refreshCase(plot, data, shelf)
 						syncStats(player)
 					end
@@ -4695,6 +4707,55 @@ end
 -- Builds a player's bakery on a free plot, or on wanted when it's free. player can be a
 -- restaurant's stand-in owner (see progress.showcase), whose UserId is the real one made
 -- negative, so nobody's client treats the plot as theirs.
+-- The Treat Designer. Saving takes (recipeIndex, design), and (recipeIndex, "Reset") goes
+-- back to the recipe's own look. Only the bakery's owner designs its treats, and only ones
+-- they know. TreatDesign.Publish shows a plot's designs to every client.
+do
+	local nextSave = {}
+	remote("DesignTreat").OnServerEvent:Connect(function(player, recipeIndex, raw)
+		local plot = playerPlots[player]
+		local data = PlayerData.Get(player)
+		local recipe = type(recipeIndex) == "number" and Config.Recipes[recipeIndex]
+		if not plot or not data or not recipe or recipeIndex > data.RecipesUnlocked or coBakers[player] then
+			return
+		end
+		if os.clock() < (nextSave[player] or 0) then
+			notify(player, "Wait a moment before saving again")
+			return
+		end
+		nextSave[player] = os.clock() + Config.TreatDesign.SaveSeconds
+		local design = raw ~= "Reset" and TreatDesign.Clean(raw, recipe) or nil
+		data.TreatDesigns[tostring(recipeIndex)] = design
+		TreatDesign.Publish(plot.model, data.TreatDesigns)
+		for key in plot.cases do
+			if table.find(data.Stock[key] or {}, recipeIndex) then
+				refreshCase(plot, data, key)
+			end
+		end
+		updateCarriedTray(player, data)
+		for _, coBaker in coBakersOf(plot) do
+			local coData = PlayerData.Get(coBaker)
+			if coData then
+				updateCarriedTray(coBaker, coData)
+			end
+		end
+		for _, model in plot.helpersFolder:GetChildren() do
+			local tray = model:FindFirstChild("CarriedTray")
+			if tray and tray:GetAttribute("Recipe") == recipeIndex then
+				setHelperTray(model, recipeIndex, design)
+			end
+		end
+		if design then
+			notify(player, ("Your %s look is saved!"):format(recipe.Name), "Coin")
+		else
+			notify(player, ("%s is back to its original look"):format(recipe.Name), "Coin")
+		end
+	end)
+	Players.PlayerRemoving:Connect(function(player)
+		nextSave[player] = nil
+	end)
+end
+
 local function claimPlot(player, wanted)
 	for _, plot in wanted and not wanted.ownerId and { wanted } or plots do
 		if not plot.ownerId then
@@ -4717,6 +4778,7 @@ local function claimPlot(player, wanted)
 			stash.place(plot, data)
 			applyPaint(plot, data)
 			exterior.apply(plot, data)
+			TreatDesign.Publish(plot.model, data.TreatDesigns)
 			exterior.ground(plot, data)
 			floorTiles.build(plot, data)
 			showBoughtStations(plot, data)
@@ -4790,6 +4852,7 @@ local function releasePlot(player)
 	stash.place(plot, nil)
 	applyPaint(plot, nil)
 	exterior.apply(plot, nil)
+	TreatDesign.Publish(plot.model, nil)
 	exterior.ground(plot, nil)
 	floorTiles.build(plot, nil)
 	removeCrate(plot)
