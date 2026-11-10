@@ -170,13 +170,118 @@ Config.Recipes = {
 			{ Kind = "Ball", Diameter = 0.25, Y = 1.35, Color = rgb(255, 190, 60) },
 		},
 	},
+	-- The rest are learned at a Bakery Level instead of bought (see Config.BakeryLevel).
+	{
+		Name = "Croissant",
+		Price = 110,
+		BakeScale = 2.8,
+		UnlockLevel = 6,
+		Ingredients = { Flour = 2, Butter = 2, Milk = 1 },
+		Parts = {
+			{ Kind = "Ball", Size = Vector3.new(1, 0.75, 0.9), Y = 0.15, Color = rgb(220, 160, 80) },
+			{ Kind = "Ball", Size = Vector3.new(0.8, 0.6, 0.7), X = 0.7, Y = 0.12, Z = 0.25, Color = rgb(210, 145, 70) },
+			{ Kind = "Ball", Size = Vector3.new(0.8, 0.6, 0.7), X = -0.7, Y = 0.12, Z = 0.25, Color = rgb(210, 145, 70) },
+			{ Kind = "Ball", Diameter = 0.45, X = 1.1, Y = 0.08, Z = 0.55, Color = rgb(200, 135, 65) },
+			{ Kind = "Ball", Diameter = 0.45, X = -1.1, Y = 0.08, Z = 0.55, Color = rgb(200, 135, 65) },
+		},
+	},
+	{
+		Name = "Cinnamon Roll",
+		Price = 160,
+		BakeScale = 3.1,
+		UnlockLevel = 7,
+		Ingredients = { Flour = 2, Sugar = 2, Butter = 1 },
+		Parts = {
+			{ Kind = "Disc", Height = 0.7, Diameter = 1.8, Y = 0, Color = rgb(200, 140, 85) },
+			{ Kind = "Disc", Height = 0.12, Diameter = 1.5, Y = 0.36, Color = rgb(140, 85, 50) },
+			{ Kind = "Disc", Height = 0.1, Diameter = 0.9, Y = 0.42, Color = rgb(255, 248, 235) },
+		},
+	},
+	{
+		Name = "Macaron",
+		Price = 230,
+		BakeScale = 3.4,
+		UnlockLevel = 8,
+		Ingredients = { Sugar = 2, Eggs = 2, Berries = 1 },
+		Parts = {
+			{ Kind = "Disc", Height = 0.35, Diameter = 1.4, Y = 0, Color = rgb(200, 170, 235) },
+			{ Kind = "Disc", Height = 0.25, Diameter = 1.25, Y = 0.3, Color = rgb(255, 240, 225) },
+			{ Kind = "Disc", Height = 0.35, Diameter = 1.4, Y = 0.6, Color = rgb(200, 170, 235) },
+		},
+	},
+	{
+		Name = "Éclair",
+		Price = 320,
+		BakeScale = 3.7,
+		UnlockLevel = 10,
+		Ingredients = { Flour = 2, Eggs = 2, Milk = 1, Sugar = 1 },
+		Parts = {
+			{ Kind = "Ball", Size = Vector3.new(2.2, 0.6, 0.7), Y = 0, Color = rgb(215, 160, 90) },
+			{ Kind = "Ball", Size = Vector3.new(2, 0.25, 0.6), Y = 0.25, Color = rgb(85, 50, 40) },
+		},
+	},
+	{
+		Name = "Cheesecake",
+		Price = 440,
+		BakeScale = 4,
+		UnlockLevel = 12,
+		Ingredients = { Milk = 2, Eggs = 2, Sugar = 1, Butter = 2 },
+		Parts = {
+			{ Kind = "Disc", Height = 0.25, Diameter = 2.2, Y = 0, Color = rgb(200, 150, 90) },
+			{ Kind = "Disc", Height = 0.6, Diameter = 2.1, Y = 0.42, Color = rgb(255, 240, 200) },
+			{ Kind = "Disc", Height = 0.12, Diameter = 2.1, Y = 0.78, Color = rgb(180, 40, 70) },
+		},
+	},
+	{
+		Name = "Strawberry Shortcake",
+		Price = 600,
+		BakeScale = 4.4,
+		UnlockLevel = 13,
+		Ingredients = { Flour = 2, Eggs = 2, Berries = 2, Milk = 1, Sugar = 1 },
+		Parts = {
+			{ Kind = "Disc", Height = 0.45, Diameter = 2, Y = 0, Color = rgb(245, 215, 150) },
+			{ Kind = "Disc", Height = 0.2, Diameter = 2, Y = 0.325, Color = rgb(255, 250, 245) },
+			{ Kind = "Disc", Height = 0.4, Diameter = 2, Y = 0.625, Color = rgb(245, 215, 150) },
+			{ Kind = "Disc", Height = 0.15, Diameter = 2, Y = 0.9, Color = rgb(255, 250, 245) },
+			{ Kind = "Ball", Diameter = 0.4, X = 0.5, Y = 1.1, Z = 0.5, Color = rgb(220, 40, 60) },
+			{ Kind = "Ball", Diameter = 0.4, X = -0.5, Y = 1.1, Z = 0.5, Color = rgb(220, 40, 60) },
+			{ Kind = "Ball", Diameter = 0.4, X = 0.5, Y = 1.1, Z = -0.5, Color = rgb(220, 40, 60) },
+			{ Kind = "Ball", Diameter = 0.4, X = -0.5, Y = 1.1, Z = -0.5, Color = rgb(220, 40, 60) },
+		},
+	},
+	{
+		Name = "Wedding Cake",
+		Price = 850,
+		BakeScale = 5,
+		UnlockLevel = 15,
+		Ingredients = { Flour = 3, Sugar = 3, Eggs = 3, Butter = 2, Milk = 2, Berries = 1 },
+		Parts = {
+			{ Kind = "Disc", Height = 0.7, Diameter = 2.6, Y = 0, Color = rgb(255, 252, 245) },
+			{ Kind = "Disc", Height = 0.6, Diameter = 1.9, Y = 0.65, Color = rgb(255, 252, 245) },
+			{ Kind = "Disc", Height = 0.5, Diameter = 1.2, Y = 1.2, Color = rgb(255, 252, 245) },
+			{ Kind = "Disc", Height = 0.1, Diameter = 2.62, Y = -0.2, Color = rgb(255, 180, 205) },
+			{ Kind = "Disc", Height = 0.1, Diameter = 1.92, Y = 0.45, Color = rgb(255, 180, 205) },
+			{ Kind = "Ball", Diameter = 0.3, Y = 1.55, Color = rgb(255, 180, 205) },
+		},
+	},
 }
+
+-- Every sale earns Bakery XP equal to the treat's base Price, so 2x Coins, boosts and
+-- Better Ingredients don't speed levelling up. Xp[n] is the XP to go from level n to n+1,
+-- and the top level is one past the end of the list. Recipes with an UnlockLevel are
+-- learned on reaching it, once the recipes before them are known. Starting levels for saves
+-- from before levels existed: a save that had N recipes starts at level N.
+Config.BakeryLevel = {
+	Xp = { 200, 500, 1000, 2000, 4000, 8000, 14000, 24000, 36000, 52000, 72000, 98000, 130000, 170000 },
+}
+Config.BakeryLevel.Max = #Config.BakeryLevel.Xp + 1
 
 -- How fast players move. The Walk/Run switch beside the hotbar picks one.
 Config.WalkSpeed = 16
 Config.RunSpeed = 28
 
--- Level 1 of each upgrade is free. Cost is the price of reaching that level.
+-- Level 1 of each upgrade is free. Cost is the price of reaching that level, and a level
+-- with NeedLevel also needs the bakery to be at that Bakery Level.
 Config.Upgrades = {
 	{
 		Id = "Oven",
@@ -186,6 +291,10 @@ Config.Upgrades = {
 			{ BakeTime = 3.5, Cost = 25 },
 			{ BakeTime = 2.5, Cost = 150 },
 			{ BakeTime = 1.5, Cost = 800 },
+			{ BakeTime = 1.2, Cost = 15000, NeedLevel = 6 },
+			{ BakeTime = 1, Cost = 40000, NeedLevel = 9 },
+			{ BakeTime = 0.8, Cost = 100000, NeedLevel = 12 },
+			{ BakeTime = 0.6, Cost = 250000, NeedLevel = 14 },
 		},
 		Describe = function(level)
 			return ("Cookies bake in %s seconds"):format(level.BakeTime)
@@ -199,6 +308,10 @@ Config.Upgrades = {
 			{ BatchSize = 3, Cost = 50 },
 			{ BatchSize = 4, Cost = 400 },
 			{ BatchSize = 6, Cost = 2000 },
+			{ BatchSize = 8, Cost = 20000, NeedLevel = 6 },
+			{ BatchSize = 10, Cost = 50000, NeedLevel = 9 },
+			{ BatchSize = 12, Cost = 120000, NeedLevel = 12 },
+			{ BatchSize = 15, Cost = 300000, NeedLevel = 14 },
 		},
 		Describe = function(level)
 			return ("Bake %d treats at a time"):format(level.BatchSize)
@@ -212,6 +325,10 @@ Config.Upgrades = {
 			{ Capacity = 12, Cost = 40 },
 			{ Capacity = 16, Cost = 250 },
 			{ Capacity = 24, Cost = 1200 },
+			{ Capacity = 32, Cost = 12000, NeedLevel = 6 },
+			{ Capacity = 40, Cost = 30000, NeedLevel = 9 },
+			{ Capacity = 50, Cost = 80000, NeedLevel = 12 },
+			{ Capacity = 60, Cost = 200000, NeedLevel = 14 },
 		},
 		Describe = function(level)
 			return ("Carry %d treats"):format(level.Capacity)
@@ -225,6 +342,10 @@ Config.Upgrades = {
 			{ Capacity = 50, Cost = 150 },
 			{ Capacity = 80, Cost = 800 },
 			{ Capacity = 120, Cost = 3000 },
+			{ Capacity = 160, Cost = 10000, NeedLevel = 6 },
+			{ Capacity = 200, Cost = 25000, NeedLevel = 9 },
+			{ Capacity = 250, Cost = 60000, NeedLevel = 12 },
+			{ Capacity = 300, Cost = 150000, NeedLevel = 14 },
 		},
 		Describe = function(level)
 			return ("Store %d of each ingredient"):format(level.Capacity)
@@ -238,6 +359,10 @@ Config.Upgrades = {
 			{ PriceBonus = 0.25, Cost = 200 },
 			{ PriceBonus = 0.5, Cost = 1500 },
 			{ PriceBonus = 1, Cost = 6000 },
+			{ PriceBonus = 1.25, Cost = 25000, NeedLevel = 6 },
+			{ PriceBonus = 1.5, Cost = 60000, NeedLevel = 9 },
+			{ PriceBonus = 2, Cost = 150000, NeedLevel = 12 },
+			{ PriceBonus = 2.5, Cost = 400000, NeedLevel = 14 },
 		},
 		Describe = function(level)
 			return ("Everything sells for %d%% more"):format(level.PriceBonus * 100)
