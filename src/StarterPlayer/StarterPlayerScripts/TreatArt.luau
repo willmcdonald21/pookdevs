@@ -43,10 +43,18 @@ function TreatArt.Write(image, art)
 	image:WritePixelsBuffer(Vector2.zero, SIZE, pixels)
 end
 
--- A new blank canvas, or nil when EditableImage isn't available.
+-- A new blank canvas, or nil when EditableImage isn't available. With the setting off,
+-- making one works but writing to it fails, so it's tried once here.
 function TreatArt.NewImage()
 	local ok, image = pcall(AssetService.CreateEditableImage, AssetService, { Size = SIZE })
-	return ok and image or nil
+	if not ok or not image then
+		return nil
+	end
+	if not pcall(image.WritePixelsBuffer, image, Vector2.zero, SIZE, buffer.create(GRID * GRID * 4)) then
+		image:Destroy()
+		return nil
+	end
+	return image
 end
 
 -- Lets go of images no treat in the world or the menus shows any more.
