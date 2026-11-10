@@ -1638,6 +1638,10 @@ Config.WantedTip = { Min = 0, Max = 0.25 }
 -- of the price as new coins. Active means they did something there in the last
 -- ActiveSeconds. A player waits AskCooldown seconds between asks, and a request closes
 -- after AnswerSeconds.
+-- Opening new restaurants. A restaurant at the top Bakery Level with Employees employees
+-- can open a new one, which starts over. Every restaurant after the first gets
+-- CustomerBonus more customers, like a boost that never ends.
+Config.Restaurants = { CustomerBonus = 0.2, Employees = 2 }
 Config.CoBake = { Max = 3, Share = 0.25, OwnerBonus = 0.1, ActiveSeconds = 120, AskCooldown = 30, AnswerSeconds = 20 }
 -- Coins go up by PerFriend for each Roblox friend in the same town, up to Max.
 Config.FriendBoost = { PerFriend = 0.1, Max = 0.3 }
