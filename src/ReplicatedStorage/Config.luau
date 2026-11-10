@@ -115,6 +115,14 @@ end
 Config.Crate = { Interval = 90, Size = 12 }
 
 -- Recipes unlock in this order. BakeScale multiplies the oven's bake time.
+-- For the Treat Designer (see Config.TreatDesign), a part's Role says what a design can
+-- change: Dough, Frosting and Filling parts take that colour, and Cherry, Candle and Flame
+-- parts are replaced by the design's own cherries and candles. Parts with no Role never
+-- change. Top is where toppings and the drawing sit, in the treat's own studs: Y is the
+-- surface height and Width/Depth its size. A Dome top curves like a ball centred at
+-- Dome.Y, Dome.Height above it. Hole leaves the middle clear (the donut's), Busy keeps
+-- toppings off the middle, Icing lets a treat with no frosting get a layer of it, and
+-- NoArt means it's too curvy or narrow to draw on.
 Config.Recipes = {
 	{
 		Name = "Cookie",
@@ -123,10 +131,11 @@ Config.Recipes = {
 		UnlockCost = 0,
 		Ingredients = { Flour = 1, Sugar = 1, Butter = 1 },
 		Parts = {
-			{ Kind = "Disc", Height = 0.4, Diameter = 2, Y = 0, Color = rgb(190, 130, 75) },
+			{ Kind = "Disc", Height = 0.4, Diameter = 2, Y = 0, Color = rgb(190, 130, 75), Role = "Dough" },
 			{ Kind = "Ball", Diameter = 0.35, X = 0.4, Y = 0.2, Color = rgb(70, 40, 30) },
 			{ Kind = "Ball", Diameter = 0.35, X = -0.4, Y = 0.2, Z = 0.3, Color = rgb(70, 40, 30) },
 		},
+		Top = { Y = 0.2, Width = 2, Icing = true },
 	},
 	{
 		Name = "Cupcake",
@@ -135,10 +144,11 @@ Config.Recipes = {
 		UnlockCost = 25,
 		Ingredients = { Flour = 1, Sugar = 1, Eggs = 1, Milk = 1 },
 		Parts = {
-			{ Kind = "Disc", Height = 0.8, Diameter = 1.5, Y = 0, Color = rgb(190, 130, 75) },
-			{ Kind = "Ball", Diameter = 1.6, Y = 0.7, Color = rgb(255, 180, 205) },
-			{ Kind = "Ball", Diameter = 0.45, Y = 1.5, Color = rgb(215, 50, 70) },
+			{ Kind = "Disc", Height = 0.8, Diameter = 1.5, Y = 0, Color = rgb(190, 130, 75), Role = "Dough" },
+			{ Kind = "Ball", Diameter = 1.6, Y = 0.7, Color = rgb(255, 180, 205), Role = "Frosting" },
+			{ Kind = "Ball", Diameter = 0.45, Y = 1.5, Color = rgb(215, 50, 70), Role = "Cherry" },
 		},
+		Top = { Y = 1.5, Width = 1.6, Dome = { Y = 0.7, Height = 0.8 }, ArtWidth = 0.9 },
 	},
 	{
 		Name = "Donut",
@@ -147,10 +157,11 @@ Config.Recipes = {
 		UnlockCost = 100,
 		Ingredients = { Flour = 2, Sugar = 1, Eggs = 1, Milk = 1 },
 		Parts = {
-			{ Kind = "Disc", Height = 0.6, Diameter = 2, Y = 0, Color = rgb(215, 160, 95) },
-			{ Kind = "Disc", Height = 0.15, Diameter = 1.9, Y = 0.35, Color = rgb(255, 150, 190) },
+			{ Kind = "Disc", Height = 0.6, Diameter = 2, Y = 0, Color = rgb(215, 160, 95), Role = "Dough" },
+			{ Kind = "Disc", Height = 0.15, Diameter = 1.9, Y = 0.35, Color = rgb(255, 150, 190), Role = "Frosting" },
 			{ Kind = "Disc", Height = 0.2, Diameter = 0.6, Y = 0.38, Color = rgb(90, 60, 70) },
 		},
+		Top = { Y = 0.425, Width = 1.9, Hole = 0.6 },
 	},
 	{
 		Name = "Pie",
@@ -159,9 +170,10 @@ Config.Recipes = {
 		UnlockCost = 400,
 		Ingredients = { Flour = 2, Butter = 1, Berries = 2 },
 		Parts = {
-			{ Kind = "Disc", Height = 0.6, Diameter = 2.4, Y = 0, Color = rgb(225, 175, 110) },
-			{ Kind = "Disc", Height = 0.15, Diameter = 1.9, Y = 0.33, Color = rgb(170, 40, 70) },
+			{ Kind = "Disc", Height = 0.6, Diameter = 2.4, Y = 0, Color = rgb(225, 175, 110), Role = "Dough" },
+			{ Kind = "Disc", Height = 0.15, Diameter = 1.9, Y = 0.33, Color = rgb(170, 40, 70), Role = "Filling" },
 		},
+		Top = { Y = 0.405, Width = 1.9 },
 	},
 	{
 		Name = "Birthday Cake",
@@ -170,11 +182,12 @@ Config.Recipes = {
 		UnlockCost = 1500,
 		Ingredients = { Flour = 2, Sugar = 2, Eggs = 2, Butter = 1, Milk = 1 },
 		Parts = {
-			{ Kind = "Disc", Height = 0.9, Diameter = 2.4, Y = 0, Color = rgb(255, 180, 205) },
-			{ Kind = "Disc", Height = 0.25, Diameter = 2.5, Y = 0.55, Color = rgb(255, 245, 230) },
-			{ Kind = "Disc", Height = 0.6, Diameter = 0.2, Y = 0.95, Color = rgb(130, 200, 215) },
-			{ Kind = "Ball", Diameter = 0.25, Y = 1.35, Color = rgb(255, 190, 60) },
+			{ Kind = "Disc", Height = 0.9, Diameter = 2.4, Y = 0, Color = rgb(255, 180, 205), Role = "Dough" },
+			{ Kind = "Disc", Height = 0.25, Diameter = 2.5, Y = 0.55, Color = rgb(255, 245, 230), Role = "Frosting" },
+			{ Kind = "Disc", Height = 0.6, Diameter = 0.2, Y = 0.95, Color = rgb(130, 200, 215), Role = "Candle" },
+			{ Kind = "Ball", Diameter = 0.25, Y = 1.35, Color = rgb(255, 190, 60), Role = "Flame" },
 		},
+		Top = { Y = 0.675, Width = 2.5 },
 	},
 	-- The rest are learned at a Bakery Level instead of bought (see Config.BakeryLevel).
 	{
@@ -184,12 +197,13 @@ Config.Recipes = {
 		UnlockLevel = 6,
 		Ingredients = { Flour = 2, Butter = 2, Milk = 1 },
 		Parts = {
-			{ Kind = "Ball", Size = Vector3.new(1, 0.75, 0.9), Y = 0.15, Color = rgb(220, 160, 80) },
-			{ Kind = "Ball", Size = Vector3.new(0.8, 0.6, 0.7), X = 0.7, Y = 0.12, Z = 0.25, Color = rgb(210, 145, 70) },
-			{ Kind = "Ball", Size = Vector3.new(0.8, 0.6, 0.7), X = -0.7, Y = 0.12, Z = 0.25, Color = rgb(210, 145, 70) },
-			{ Kind = "Ball", Diameter = 0.45, X = 1.1, Y = 0.08, Z = 0.55, Color = rgb(200, 135, 65) },
-			{ Kind = "Ball", Diameter = 0.45, X = -1.1, Y = 0.08, Z = 0.55, Color = rgb(200, 135, 65) },
+			{ Kind = "Ball", Size = Vector3.new(1, 0.75, 0.9), Y = 0.15, Color = rgb(220, 160, 80), Role = "Dough" },
+			{ Kind = "Ball", Size = Vector3.new(0.8, 0.6, 0.7), X = 0.7, Y = 0.12, Z = 0.25, Color = rgb(210, 145, 70), Role = "Dough" },
+			{ Kind = "Ball", Size = Vector3.new(0.8, 0.6, 0.7), X = -0.7, Y = 0.12, Z = 0.25, Color = rgb(210, 145, 70), Role = "Dough" },
+			{ Kind = "Ball", Diameter = 0.45, X = 1.1, Y = 0.08, Z = 0.55, Color = rgb(200, 135, 65), Role = "Dough" },
+			{ Kind = "Ball", Diameter = 0.45, X = -1.1, Y = 0.08, Z = 0.55, Color = rgb(200, 135, 65), Role = "Dough" },
 		},
+		Top = { Y = 0.525, Width = 1, Depth = 0.9, Dome = { Y = 0.15, Height = 0.375 }, NoArt = true },
 	},
 	{
 		Name = "Cinnamon Roll",
@@ -198,10 +212,11 @@ Config.Recipes = {
 		UnlockLevel = 7,
 		Ingredients = { Flour = 2, Sugar = 2, Butter = 1 },
 		Parts = {
-			{ Kind = "Disc", Height = 0.7, Diameter = 1.8, Y = 0, Color = rgb(200, 140, 85) },
-			{ Kind = "Disc", Height = 0.12, Diameter = 1.5, Y = 0.36, Color = rgb(140, 85, 50) },
-			{ Kind = "Disc", Height = 0.1, Diameter = 0.9, Y = 0.42, Color = rgb(255, 248, 235) },
+			{ Kind = "Disc", Height = 0.7, Diameter = 1.8, Y = 0, Color = rgb(200, 140, 85), Role = "Dough" },
+			{ Kind = "Disc", Height = 0.12, Diameter = 1.5, Y = 0.36, Color = rgb(140, 85, 50), Role = "Filling" },
+			{ Kind = "Disc", Height = 0.1, Diameter = 0.9, Y = 0.42, Color = rgb(255, 248, 235), Role = "Frosting" },
 		},
+		Top = { Y = 0.47, Width = 1.5 },
 	},
 	{
 		Name = "Macaron",
@@ -210,10 +225,11 @@ Config.Recipes = {
 		UnlockLevel = 8,
 		Ingredients = { Sugar = 2, Eggs = 2, Berries = 1 },
 		Parts = {
-			{ Kind = "Disc", Height = 0.35, Diameter = 1.4, Y = 0, Color = rgb(200, 170, 235) },
-			{ Kind = "Disc", Height = 0.25, Diameter = 1.25, Y = 0.3, Color = rgb(255, 240, 225) },
-			{ Kind = "Disc", Height = 0.35, Diameter = 1.4, Y = 0.6, Color = rgb(200, 170, 235) },
+			{ Kind = "Disc", Height = 0.35, Diameter = 1.4, Y = 0, Color = rgb(200, 170, 235), Role = "Dough" },
+			{ Kind = "Disc", Height = 0.25, Diameter = 1.25, Y = 0.3, Color = rgb(255, 240, 225), Role = "Filling" },
+			{ Kind = "Disc", Height = 0.35, Diameter = 1.4, Y = 0.6, Color = rgb(200, 170, 235), Role = "Dough" },
 		},
+		Top = { Y = 0.775, Width = 1.4, Icing = true },
 	},
 	{
 		Name = "Éclair",
@@ -222,9 +238,10 @@ Config.Recipes = {
 		UnlockLevel = 10,
 		Ingredients = { Flour = 2, Eggs = 2, Milk = 1, Sugar = 1 },
 		Parts = {
-			{ Kind = "Ball", Size = Vector3.new(2.2, 0.6, 0.7), Y = 0, Color = rgb(215, 160, 90) },
-			{ Kind = "Ball", Size = Vector3.new(2, 0.25, 0.6), Y = 0.25, Color = rgb(85, 50, 40) },
+			{ Kind = "Ball", Size = Vector3.new(2.2, 0.6, 0.7), Y = 0, Color = rgb(215, 160, 90), Role = "Dough" },
+			{ Kind = "Ball", Size = Vector3.new(2, 0.25, 0.6), Y = 0.25, Color = rgb(85, 50, 40), Role = "Frosting" },
 		},
+		Top = { Y = 0.375, Width = 2, Depth = 0.6, Dome = { Y = 0.25, Height = 0.125 }, NoArt = true },
 	},
 	{
 		Name = "Cheesecake",
@@ -233,10 +250,11 @@ Config.Recipes = {
 		UnlockLevel = 12,
 		Ingredients = { Milk = 2, Eggs = 2, Sugar = 1, Butter = 2 },
 		Parts = {
-			{ Kind = "Disc", Height = 0.25, Diameter = 2.2, Y = 0, Color = rgb(200, 150, 90) },
-			{ Kind = "Disc", Height = 0.6, Diameter = 2.1, Y = 0.42, Color = rgb(255, 240, 200) },
-			{ Kind = "Disc", Height = 0.12, Diameter = 2.1, Y = 0.78, Color = rgb(180, 40, 70) },
+			{ Kind = "Disc", Height = 0.25, Diameter = 2.2, Y = 0, Color = rgb(200, 150, 90), Role = "Dough" },
+			{ Kind = "Disc", Height = 0.6, Diameter = 2.1, Y = 0.42, Color = rgb(255, 240, 200), Role = "Filling" },
+			{ Kind = "Disc", Height = 0.12, Diameter = 2.1, Y = 0.78, Color = rgb(180, 40, 70), Role = "Frosting" },
 		},
+		Top = { Y = 0.84, Width = 2.1 },
 	},
 	{
 		Name = "Strawberry Shortcake",
@@ -245,15 +263,16 @@ Config.Recipes = {
 		UnlockLevel = 13,
 		Ingredients = { Flour = 2, Eggs = 2, Berries = 2, Milk = 1, Sugar = 1 },
 		Parts = {
-			{ Kind = "Disc", Height = 0.45, Diameter = 2, Y = 0, Color = rgb(245, 215, 150) },
-			{ Kind = "Disc", Height = 0.2, Diameter = 2, Y = 0.325, Color = rgb(255, 250, 245) },
-			{ Kind = "Disc", Height = 0.4, Diameter = 2, Y = 0.625, Color = rgb(245, 215, 150) },
-			{ Kind = "Disc", Height = 0.15, Diameter = 2, Y = 0.9, Color = rgb(255, 250, 245) },
-			{ Kind = "Ball", Diameter = 0.4, X = 0.5, Y = 1.1, Z = 0.5, Color = rgb(220, 40, 60) },
-			{ Kind = "Ball", Diameter = 0.4, X = -0.5, Y = 1.1, Z = 0.5, Color = rgb(220, 40, 60) },
-			{ Kind = "Ball", Diameter = 0.4, X = 0.5, Y = 1.1, Z = -0.5, Color = rgb(220, 40, 60) },
-			{ Kind = "Ball", Diameter = 0.4, X = -0.5, Y = 1.1, Z = -0.5, Color = rgb(220, 40, 60) },
+			{ Kind = "Disc", Height = 0.45, Diameter = 2, Y = 0, Color = rgb(245, 215, 150), Role = "Dough" },
+			{ Kind = "Disc", Height = 0.2, Diameter = 2, Y = 0.325, Color = rgb(255, 250, 245), Role = "Filling" },
+			{ Kind = "Disc", Height = 0.4, Diameter = 2, Y = 0.625, Color = rgb(245, 215, 150), Role = "Dough" },
+			{ Kind = "Disc", Height = 0.15, Diameter = 2, Y = 0.9, Color = rgb(255, 250, 245), Role = "Frosting" },
+			{ Kind = "Ball", Diameter = 0.4, X = 0.5, Y = 1.1, Z = 0.5, Color = rgb(220, 40, 60), Role = "Cherry" },
+			{ Kind = "Ball", Diameter = 0.4, X = -0.5, Y = 1.1, Z = 0.5, Color = rgb(220, 40, 60), Role = "Cherry" },
+			{ Kind = "Ball", Diameter = 0.4, X = 0.5, Y = 1.1, Z = -0.5, Color = rgb(220, 40, 60), Role = "Cherry" },
+			{ Kind = "Ball", Diameter = 0.4, X = -0.5, Y = 1.1, Z = -0.5, Color = rgb(220, 40, 60), Role = "Cherry" },
 		},
+		Top = { Y = 0.975, Width = 2 },
 	},
 	{
 		Name = "Wedding Cake",
@@ -262,15 +281,64 @@ Config.Recipes = {
 		UnlockLevel = 15,
 		Ingredients = { Flour = 3, Sugar = 3, Eggs = 3, Butter = 2, Milk = 2, Berries = 1 },
 		Parts = {
-			{ Kind = "Disc", Height = 0.7, Diameter = 2.6, Y = 0, Color = rgb(255, 252, 245) },
-			{ Kind = "Disc", Height = 0.6, Diameter = 1.9, Y = 0.65, Color = rgb(255, 252, 245) },
-			{ Kind = "Disc", Height = 0.5, Diameter = 1.2, Y = 1.2, Color = rgb(255, 252, 245) },
-			{ Kind = "Disc", Height = 0.1, Diameter = 2.62, Y = -0.2, Color = rgb(255, 180, 205) },
-			{ Kind = "Disc", Height = 0.1, Diameter = 1.92, Y = 0.45, Color = rgb(255, 180, 205) },
+			{ Kind = "Disc", Height = 0.7, Diameter = 2.6, Y = 0, Color = rgb(255, 252, 245), Role = "Dough" },
+			{ Kind = "Disc", Height = 0.6, Diameter = 1.9, Y = 0.65, Color = rgb(255, 252, 245), Role = "Dough" },
+			{ Kind = "Disc", Height = 0.5, Diameter = 1.2, Y = 1.2, Color = rgb(255, 252, 245), Role = "Dough" },
+			{ Kind = "Disc", Height = 0.1, Diameter = 2.62, Y = -0.2, Color = rgb(255, 180, 205), Role = "Frosting" },
+			{ Kind = "Disc", Height = 0.1, Diameter = 1.92, Y = 0.45, Color = rgb(255, 180, 205), Role = "Frosting" },
 			{ Kind = "Ball", Diameter = 0.3, Y = 1.55, Color = rgb(255, 180, 205) },
 		},
+		Top = { Y = 1.45, Width = 1.2, Busy = true },
 	},
 }
+
+-- The Treat Designer: the Customize button beside a known recipe in the Cookbook. A design
+-- recolours the treat's Dough, Frosting and Filling, adds sprinkles, cherries, whipped
+-- cream and candles, and can have a drawing in frosting on a Grid x Grid canvas. It's
+-- free, and each restaurant keeps its own designs. SaveSeconds is the wait between saves.
+Config.TreatDesign = {
+	Grid = 25,
+	Sprinkles = 8,
+	MaxCherries = 4,
+	MaxCream = 6,
+	MaxCandles = 5,
+	SaveSeconds = 1,
+	CherryColor = rgb(215, 45, 65),
+	CreamColor = rgb(255, 252, 245),
+	FlameColor = rgb(255, 190, 60),
+	DefaultCandle = "Sky",
+}
+-- Colours for designs, in order. A drawing saves each cell as one letter: "a" is the
+-- first colour here, so only ever add colours at the end.
+Config.TreatColors = {
+	{ Id = "Snow", Name = "Snow", Color = rgb(255, 252, 245) },
+	{ Id = "Vanilla", Name = "Vanilla", Color = rgb(255, 240, 200) },
+	{ Id = "Golden", Name = "Golden", Color = rgb(225, 175, 110) },
+	{ Id = "Caramel", Name = "Caramel", Color = rgb(200, 140, 85) },
+	{ Id = "Chocolate", Name = "Chocolate", Color = rgb(120, 75, 50) },
+	{ Id = "Cocoa", Name = "Dark Cocoa", Color = rgb(70, 40, 30) },
+	{ Id = "Strawberry", Name = "Strawberry", Color = rgb(255, 180, 205) },
+	{ Id = "Bubblegum", Name = "Bubblegum", Color = rgb(255, 130, 180) },
+	{ Id = "Cherry", Name = "Cherry", Color = rgb(215, 45, 65) },
+	{ Id = "Orange", Name = "Orange", Color = rgb(255, 160, 70) },
+	{ Id = "Lemon", Name = "Lemon", Color = rgb(255, 230, 110) },
+	{ Id = "Mint", Name = "Mint", Color = rgb(160, 225, 195) },
+	{ Id = "Pistachio", Name = "Pistachio", Color = rgb(150, 190, 110) },
+	{ Id = "Sky", Name = "Sky", Color = rgb(130, 200, 215) },
+	{ Id = "Blueberry", Name = "Blueberry", Color = rgb(85, 110, 200) },
+	{ Id = "Lavender", Name = "Lavender", Color = rgb(200, 170, 235) },
+	{ Id = "Grape", Name = "Grape", Color = rgb(130, 70, 160) },
+	{ Id = "Licorice", Name = "Licorice", Color = rgb(40, 35, 40) },
+}
+
+function Config.GetTreatColor(id)
+	for index, color in Config.TreatColors do
+		if color.Id == id then
+			return color, index
+		end
+	end
+	return nil
+end
 
 -- Every sale earns Bakery XP equal to the treat's base Price, so 2x Coins, boosts and
 -- Better Ingredients don't speed levelling up. Xp[n] is the XP to go from level n to n+1,
