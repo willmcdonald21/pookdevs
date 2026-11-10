@@ -171,6 +171,52 @@ local function earn(player, data, amount)
 	return coins
 end
 
+-- Bakery Levels. It's one table, not two locals, because this script is near Luau's limit of
+-- 200 local variables.
+local bakeryLevel = {}
+
+-- Learns every recipe whose UnlockLevel the bakery has reached, in order, and returns
+-- their names. A recipe bought with coins still comes first, so learning stops there.
+function bakeryLevel.learn(data)
+	local learned = {}
+	while true do
+		local recipe = Config.Recipes[data.RecipesUnlocked + 1]
+		if not (recipe and recipe.UnlockLevel and data.BakeryLevel >= recipe.UnlockLevel) then
+			break
+		end
+		data.RecipesUnlocked += 1
+		table.insert(learned, recipe.Name)
+	end
+	return learned
+end
+
+-- Adds Bakery XP for the owner's bakery (the base price of what sold) and levels it up.
+-- A level that teaches a recipe gets a popup, and other levels a toast. The caller syncs.
+function bakeryLevel.addXp(player, data, xp)
+	local levels = Config.BakeryLevel.Xp
+	if not levels[data.BakeryLevel] then
+		return
+	end
+	data.BakeryXp += math.floor(xp)
+	local reached = nil
+	while levels[data.BakeryLevel] and data.BakeryXp >= levels[data.BakeryLevel] do
+		data.BakeryXp -= levels[data.BakeryLevel]
+		data.BakeryLevel += 1
+		reached = data.BakeryLevel
+	end
+	if not levels[data.BakeryLevel] then
+		data.BakeryXp = 0
+	end
+	if reached then
+		local learned = bakeryLevel.learn(data)
+		if #learned > 0 then
+			popupEvent:FireClient(player, "LevelUp", { Level = reached, Learned = learned, Max = reached == Config.BakeryLevel.Max })
+		else
+			notify(player, ("Level up! Your bakery is level %d"):format(reached), "Ding")
+		end
+	end
+end
+
 -- Days start at midnight US Eastern time, so everyone's new day starts at the same moment.
 -- Servers have no time zone data, so daylight time is worked out here: EDT (UTC-4) runs from
 -- 2am on the 2nd Sunday of March (07:00 UTC) to 2am on the 1st Sunday of November (06:00 UTC),
@@ -301,13 +347,13 @@ end
 
 local function canUnlockRecipe(data)
 	local nextRecipe = Config.Recipes[data.RecipesUnlocked + 1]
-	return nextRecipe ~= nil and data.Coins >= nextRecipe.UnlockCost
+	return nextRecipe ~= nil and nextRecipe.UnlockCost ~= nil and data.Coins >= nextRecipe.UnlockCost
 end
 
 local function canAffordUpgrade(data)
 	for _, upgrade in Config.Upgrades do
 		local nextLevel = upgrade.Levels[data[upgrade.Id .. "Level"] + 1]
-		if nextLevel and data.Coins >= nextLevel.Cost then
+		if nextLevel and data.Coins >= nextLevel.Cost and data.BakeryLevel >= (nextLevel.NeedLevel or 0) then
 			return true
 		end
 	end
@@ -801,6 +847,9 @@ local function syncStats(player, skipCoBakers)
 		Coins = data.Coins,
 		Stars = data.Stars,
 		RecipesUnlocked = data.RecipesUnlocked,
+		BakeryLevel = data.BakeryLevel,
+		BakeryXp = data.BakeryXp,
+		XpNeeded = Config.BakeryLevel.Xp[data.BakeryLevel],
 		Levels = upgradeLevels(data),
 		Tray = data.Tray,
 		TrayCapacity = trayCapacity(data),
@@ -1998,10 +2047,13 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 	end
 	if kind == "Recipe" then
 		local recipe = Config.Recipes[data.RecipesUnlocked + 1]
-		if recipe and buy(player, data, recipe.UnlockCost) then
+		if recipe and recipe.UnlockCost and buy(player, data, recipe.UnlockCost) then
 			data.RecipesUnlocked += 1
+			-- Recipes the bakery's level has already reached come straight after it.
+			local learned = bakeryLevel.learn(data)
 			syncStats(player)
-			notify(player, recipe.Name .. " unlocked!", "Coin")
+			table.insert(learned, 1, recipe.Name)
+			notify(player, table.concat(learned, " and ") .. " unlocked!", "Coin")
 		end
 	elseif kind == "Upgrade" and type(id) == "string" then
 		local upgrade = Config.GetUpgrade(id)
@@ -2010,6 +2062,10 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 		end
 		local key = upgrade.Id .. "Level"
 		local nextLevel = upgrade.Levels[data[key] + 1]
+		if nextLevel and nextLevel.NeedLevel and data.BakeryLevel < nextLevel.NeedLevel then
+			notify(player, ("Reach Bakery Level %d first"):format(nextLevel.NeedLevel))
+			return
+		end
 		if nextLevel and buy(player, data, nextLevel.Cost) then
 			data[key] += 1
 			refreshEmployees(plot, data)
@@ -2323,11 +2379,18 @@ shipEvent.OnServerEvent:Connect(function(player, slot)
 		notify(player, "Your tray doesn't have everything for this order yet")
 		return
 	end
+	local xp = 0
 	for index, count in order.Items do
 		data.Tray[index] -= count
+		xp += Config.Recipes[index].Price * count
 	end
 	markActive(player)
 	local earned = earn(player, data, order.Coins)
+	-- The XP goes to the bakery the order came from, which is the owner's.
+	local ownerData = PlayerData.Get(plot.owner)
+	if ownerData then
+		bakeryLevel.addXp(plot.owner, ownerData, xp)
+	end
 	data.Stars += order.Stars
 	addGoalProgress(data, "Ship")
 	data.TutorialDone = true
@@ -2923,6 +2986,7 @@ function checkout.pay(plot, person)
 	end
 	data.Stars += stars
 	addGoalProgress(data, "Sell", table.find(Config.Recipes, recipe))
+	bakeryLevel.addXp(owner, data, recipe.Price)
 	syncStats(owner)
 	if person.golden then
 		local tips = {}
@@ -4763,7 +4827,7 @@ local function sellWhileAway(player, data)
 	end
 	local away = math.clamp(os.time() - data.LastSeen, 0, Config.OfflineMaxSeconds)
 	local visits = math.floor(away / customerInterval(data))
-	local sold, coins = 0, 0
+	local sold, coins, xp = 0, 0, 0
 	while sold < visits do
 		local stocked = {}
 		for key, stock in data.Stock do
@@ -4779,10 +4843,12 @@ local function sellWhileAway(player, data)
 		local stock = stocked[math.random(#stocked)]
 		local recipeIndex = table.remove(stock, math.random(#stock))
 		coins += salePrice(data, Config.Recipes[recipeIndex])
+		xp += Config.Recipes[recipeIndex].Price
 		sold += 1
 	end
 	if sold > 0 then
 		popupEvent:FireClient(player, "Away", { Sold = sold, Coins = earn(player, data, coins) })
+		bakeryLevel.addXp(player, data, xp)
 	end
 end
 
