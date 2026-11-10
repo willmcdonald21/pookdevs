@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Layout = require(ReplicatedStorage:WaitForChild("Layout"))
+local TreatDesign = require(ReplicatedStorage:WaitForChild("TreatDesign"))
 
 local RETRIES = 3
 local RETRY_DELAY = 1
@@ -53,6 +54,7 @@ local RESTAURANT_FIELDS = {
 	"Coins", "RecipesUnlocked", "BakeryLevel", "BakeryXp", "Tray", "Owned", "Placed", "Stock",
 	"Stations", "LayoutVersion", "LuxuryOven", "Stash", "Expansion", "Paint", "Exterior",
 	"BakeryName", "Garden", "Floor", "Goals", "Employees", "LastRecipe", "SparePaint", "Pantry",
+	"TreatDesigns",
 }
 for _, upgrade in Config.Upgrades do
 	table.insert(RESTAURANT_FIELDS, upgrade.Id .. "Level")
@@ -379,6 +381,9 @@ local function clean(saved)
 		Garden = saved.Garden == true,
 		-- Floor style Ids by tile key. See Layout.TileSize.
 		Floor = cleanFloor(saved.Floor),
+		-- Treat Designer looks by recipe index as text. A recipe with none looks as it
+		-- always has. See TreatDesign.
+		TreatDesigns = TreatDesign.CleanAll(saved.TreatDesigns),
 		-- 0 until the first save, so a 0 here means this is the player's first visit.
 		LastSeen = cleanCount(saved.LastSeen),
 		-- Who invited this player (a userId), or 0. Set on a first visit through an invite.
