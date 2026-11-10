@@ -307,29 +307,31 @@ function TreatDesign.Build(recipeIndex, design, scale, cframe)
 	return ItemBuilder.Build(TreatDesign.Definition(Config.Recipes[recipeIndex], design), scale, cframe)
 end
 
--- Designs travel to clients as JSON in a plot's TreatDesigns attribute, keyed by recipe
--- index as text.
-function TreatDesign.Encode(designs)
-	local out = {}
-	for index, design in designs do
-		out[tostring(index)] = design
-	end
-	return HttpService:JSONEncode(out)
-end
-
-function TreatDesign.Decode(text)
+-- A save's designs are keyed by recipe index as text, so they store as JSON. CleanAll
+-- checks a whole saved set, and For finds one recipe's design (or nil).
+function TreatDesign.CleanAll(saved)
 	local designs = {}
-	local ok, raw = pcall(HttpService.JSONDecode, HttpService, text or "")
-	if ok and type(raw) == "table" then
-		for key, design in raw do
-			local index = tonumber(key)
-			local recipe = index and Config.Recipes[index]
-			if recipe then
-				designs[index] = TreatDesign.Clean(design, recipe)
-			end
+	if type(saved) == "table" then
+		for index, recipe in Config.Recipes do
+			local key = tostring(index)
+			designs[key] = TreatDesign.Clean(saved[key], recipe)
 		end
 	end
 	return designs
+end
+
+function TreatDesign.For(designs, recipeIndex)
+	return designs and designs[tostring(recipeIndex)]
+end
+
+-- Designs travel to clients as JSON in a plot's TreatDesigns attribute.
+function TreatDesign.Encode(designs)
+	return HttpService:JSONEncode(designs or {})
+end
+
+function TreatDesign.Decode(text)
+	local ok, raw = pcall(HttpService.JSONDecode, HttpService, text or "")
+	return TreatDesign.CleanAll(ok and raw or nil)
 end
 
 return TreatDesign
