@@ -131,8 +131,9 @@ local function upgradeLevel(data, id)
 	return Config.GetUpgrade(id).Levels[data[id .. "Level"]]
 end
 
+-- Rounded to the nearest coin, so even a 1-coin Cookie gains from Better Ingredients.
 local function salePrice(data, recipe)
-	return math.floor(recipe.Price * (1 + upgradeLevel(data, "Ingredients").PriceBonus))
+	return math.floor(recipe.Price * (1 + upgradeLevel(data, "Ingredients").PriceBonus) + 0.5)
 end
 
 -- 2x Coins and the timed boost each double coins earned from customers and deliveries,
@@ -2298,7 +2299,7 @@ buyGroceriesEvent.OnServerEvent:Connect(function(player, id, how)
 	end
 	data.Pantry[id] += amount
 	syncStats(player)
-	notify(player, ("Bought %d %s for %d coins"):format(amount, ingredient.Name, price), "Coin")
+	notify(player, ("Bought %d %s for %s"):format(amount, ingredient.Name, Config.CoinText(price)), "Coin")
 end)
 
 -- Deliveries
@@ -2992,7 +2993,7 @@ function checkout.pay(plot, person)
 		local share = coData and earn(coBaker, coData, price * Config.CoBake.Share) or 0
 		-- Syncing the owner below syncs co-bakers too.
 		if share > 0 then
-			notify(coBaker, ("+%d coins: you helped sell a %s"):format(share, recipe.Name:lower()), "Coin")
+			notify(coBaker, ("+%s: you helped sell a %s"):format(Config.CoinText(share), recipe.Name:lower()), "Coin")
 		end
 	end
 	local tipCoins = 0
@@ -3010,17 +3011,17 @@ function checkout.pay(plot, person)
 	if person.golden then
 		local tips = {}
 		if tipCoins > 0 then
-			table.insert(tips, ("%d coins"):format(tipCoins))
+			table.insert(tips, Config.CoinText(tipCoins))
 		end
 		if stars > 0 then
 			table.insert(tips, "a Sugar Star")
 		end
 		local tipText = #tips > 0 and " and tipped " .. table.concat(tips, " and ") or ""
-		notify(owner, ("+%d coins: a golden customer bought %s%s!"):format(coins, recipe.Name:lower(), tipText), "Coin")
+		notify(owner, ("+%s: a golden customer bought %s%s!"):format(Config.CoinText(coins), recipe.Name:lower(), tipText), "Coin")
 	elseif tipCoins > 0 then
-		notify(owner, ("+%d coins: %s sold, +%d tip!"):format(coins, recipe.Name, tipCoins), "Coin")
+		notify(owner, ("+%s: %s sold, +%d tip!"):format(Config.CoinText(coins), recipe.Name, tipCoins), "Coin")
 	else
-		notify(owner, ("+%d coins: %s sold"):format(coins, recipe.Name), "Coin")
+		notify(owner, ("+%s: %s sold"):format(Config.CoinText(coins), recipe.Name), "Coin")
 	end
 end
 
