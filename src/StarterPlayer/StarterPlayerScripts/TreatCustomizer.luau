@@ -43,7 +43,9 @@ return function(ctx)
 	local tool = "Pen"
 	local brush = 1
 	local waiting = {}
-	local preview, previewKey = nil, nil
+	-- previewPivot is how the preview's first part sits before it turns: a lying-down
+	-- cylinder for most treats.
+	local preview, previewKey, previewPivot = nil, nil, nil
 	local angle, dragging, dragX = 0, false, 0
 	local painting, lastCell = false, nil
 	-- The server takes one save a second, so the button waits that long too.
@@ -303,6 +305,7 @@ return function(ctx)
 				end
 			end
 			preview.Parent = view
+			previewPivot = preview:GetPivot()
 			local center, extents = preview:GetBoundingBox()
 			camera.CFrame = CFrame.lookAt(center.Position + Vector3.new(0, 1, 0.9).Unit * extents.Magnitude * 1.05, center.Position)
 		end
@@ -368,7 +371,7 @@ return function(ctx)
 		local row = style(Instance.new("Frame"), "Stepper", UDim2.new(1, -12, 0, 48), UDim2.new(), Vector2.zero, colours.WHITE)
 		row.LayoutOrder = order
 		row.Parent = body
-		local text = label("Name", UDim2.new(1, -170, 1, -8), UDim2.fromOffset(4, 4), Vector2.zero, colours.WHITE, colours.BROWN, row)
+		local text = label("Label", UDim2.new(1, -170, 1, -8), UDim2.fromOffset(4, 4), Vector2.zero, colours.WHITE, colours.BROWN, row)
 		text.TextXAlignment = Enum.TextXAlignment.Left
 		text.Text = name
 		local less = button("Less", UDim2.fromOffset(44, 40), UDim2.new(1, -112, 0.5, 0), Vector2.new(1, 0.5), value > 0 and colours.PINK or colours.GREY, row)
@@ -655,7 +658,7 @@ return function(ctx)
 			if not dragging then
 				angle += delta * 0.5
 			end
-			preview:PivotTo(CFrame.Angles(0, angle, 0))
+			preview:PivotTo(CFrame.Angles(0, angle, 0) * previewPivot)
 		end
 	end)
 
