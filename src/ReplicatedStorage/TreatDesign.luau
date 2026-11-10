@@ -329,6 +329,13 @@ function TreatDesign.Encode(designs)
 	return HttpService:JSONEncode(designs or {})
 end
 
+-- The server shows a plot's designs (nil when nobody owns it) to every client. DesignStamp
+-- goes up with each change, so whatever shows a treat knows to build it again.
+function TreatDesign.Publish(plotModel, designs)
+	plotModel:SetAttribute("TreatDesigns", designs and TreatDesign.Encode(designs) or nil)
+	plotModel:SetAttribute("DesignStamp", (plotModel:GetAttribute("DesignStamp") or 0) + 1)
+end
+
 function TreatDesign.Decode(text)
 	local ok, raw = pcall(HttpService.JSONDecode, HttpService, text or "")
 	return TreatDesign.CleanAll(ok and raw or nil)
