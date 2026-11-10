@@ -74,3 +74,25 @@ Phase 2 of the plan for keeping players playing once they max out. It needs Bake
 - The owner's "Manage this bakery" door prompt is handled the same way as "Ask to Bake
   Together" (the door prompt's client filter is in `BakeryClient`).
 - The HUD shows "Restaurant 2 · +20% customers" under the coin balance.
+
+## Built and tested (2026-11-09)
+
+Built as planned, with these details:
+- **Stand-in owners:** a restaurant on show gets a stand-in owner: a table with the owner's name, the UserId made negative, and `ShowcaseOf` (the real player). `PlayerData.Showcase` gives it a JSON copy of that restaurant's save that is never saved. So the existing `PlayerData.Get(plot.owner)` code works unchanged, and nothing a showcase does reaches the real save. `notify`, `syncStats`, `updateGuide` and the level-up popup skip anything that isn't a Player. `plot.showcase` is the stand-in.
+- **Ingredients and workers:** a showcase never uses up its pantry, which is filled to capacity when it opens. It gets temporary workers for every job its hired employees don't cover. The third worker waits in front of the oven (`ovenSpot` side 0).
+- **Door prompt:** the prompt reads "Manage this bakery / Your Restaurant N", with a `ManageFor` attribute so only the owner's client shows it. The answer card is the Bake Together card, with its own text.
+- **Order of a switch:** the save is changed before any plot is released, so a failure leaves the bakery standing.
+- **Opening or switching is refused while baking together** (as a guest or with co-bakers).
+- **Script room:** all server code is in the `progress` table. BakeryClient gained no top-level locals: the Yes/No box is `panels.askYesNo` (the grocery's box), and the remote is looked up when tapped.
+
+Tested in Studio on a fake save, with nothing written to the DataStore:
+- **Opening:** at level 15 with 2 employees, the Cookbook showed Open. Opening gave Restaurant 2 with 0 coins at level 1 and Stars unchanged, plus the badge's "Restaurant 2 · +20% customers" line. Restaurant 1 went on show on Plot 2 with its sign name, three workers (baking, stocking, ringing customers up) and customers walking in. After 90 seconds its saved copy was unchanged: 5,000 coins, 6 treats in stock and 2 employees.
+- **Switching:** with 777 coins in Restaurant 2, Manage at Restaurant 1's door showed "Manage Restaurant 1? Restaurant 2 will keep running by itself". Yes made Restaurant 1 the managed one on that plot, with its coins back, and Restaurant 2 went on show with its 777 kept and three temporary workers.
+- **Plot limit:** after 5 more opens (7 restaurants, 6 unmanaged, 5 free plots), the 5 newest were on show and the oldest was left out.
+
+Not tested:
+- **The prompt itself:** Studio wouldn't show the door prompt, even 2 studs away (a Studio problem seen before). The Manage path was run through a temporary test hook in Studio's copy of BakerySystem, removed afterwards.
+- **The Yes/No box:** mouse clicks timed out that session, so it wasn't tapped. The remote it fires was tested.
+- **Needing a real second player:** a second player joining when every plot is taken (`progress.makeRoom`), the owner leaving (`progress.leave`), and two players' showcases sharing plots.
+- **The published game:** a real save's `Restaurants` being saved and loaded again.
+
