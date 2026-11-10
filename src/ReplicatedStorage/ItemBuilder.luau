@@ -7,7 +7,9 @@ local ItemBuilder = {}
 -- own colour. When paint is a Color3, parts with Paint = true take that colour instead.
 -- A Ball with a Size instead of a Diameter is squashed or stretched to it. Turn tilts a part
 -- by that many degrees around X, Y and Z. A part with Petals = true drops cherry blossom
--- petals, like the park's cherry trees.
+-- petals, like the park's cherry trees. A part with Art (a Treat Designer drawing, see
+-- TreatDesign) is an invisible plate with a TreatArt decal on top. The decal keeps the
+-- drawing in its Art attribute, and the client paints it (see TreatArt).
 function ItemBuilder.Build(definition, scale, cframe, solid, paint)
 	local model = Instance.new("Model")
 	model.Name = definition.Name
@@ -50,6 +52,15 @@ function ItemBuilder.Build(definition, scale, cframe, solid, paint)
 		end
 		if spec.Petals then
 			ItemBuilder.AddPetals(part)
+		end
+		if spec.Art then
+			part.Transparency = 1
+			part.CastShadow = false
+			local decal = Instance.new("Decal")
+			decal.Name = "TreatArt"
+			decal.Face = Enum.NormalId.Top
+			decal:SetAttribute("Art", spec.Art)
+			decal.Parent = part
 		end
 		if first then
 			local weld = Instance.new("WeldConstraint")
