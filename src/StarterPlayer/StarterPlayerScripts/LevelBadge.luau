@@ -1,5 +1,6 @@
 -- The Bakery Level badge on the HUD, under the Boosts button: "Level 6" over a bar that
--- fills with XP toward the next level. BakeryClient requires this, calls the function it
+-- fills with XP toward the next level. From a second restaurant on, a line under it reads
+-- "Restaurant 2 · +20% customers". BakeryClient requires this, calls the function it
 -- returns with its gui and colours (ctx), and calls the update it gets back with each new
 -- state.
 return function(ctx)
@@ -39,7 +40,23 @@ return function(ctx)
 	text.Parent = badge
 	badge.Parent = ctx.gui
 
+	local restaurant = Instance.new("TextLabel")
+	restaurant.Name = "RestaurantLabel"
+	restaurant.Size = UDim2.fromOffset(120, 20)
+	restaurant.Position = UDim2.fromOffset(10, 302)
+	restaurant.BackgroundTransparency = 1
+	restaurant.TextColor3 = colours.BROWN
+	restaurant.TextStrokeColor3 = colours.WHITE
+	restaurant.TextStrokeTransparency = 0.3
+	restaurant.Font = ctx.font
+	restaurant.TextScaled = true
+	restaurant.Visible = false
+	restaurant.Parent = ctx.gui
+
 	return function(state)
+		local number = state.Restaurant or 1
+		restaurant.Visible = number > 1
+		restaurant.Text = ("Restaurant %d · +%d%% customers"):format(number, math.floor((state.CustomerBonus or 0) * 100 + 0.5))
 		local level = state.BakeryLevel or 1
 		if state.XpNeeded then
 			text.Text = ("Level %d"):format(level)
