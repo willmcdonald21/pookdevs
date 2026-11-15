@@ -3884,6 +3884,9 @@ local function refreshPrompt(prompt)
 		prompt.Enabled = active and prompt:GetAttribute("ManageFor") == player.UserId
 	elseif prompt:GetAttribute("Door") then
 		prompt.Enabled = active and plot ~= nil and plot:GetAttribute("OwnerId") ~= nil and not isMine(plot) and not coBaking
+	elseif prompt:GetAttribute("Everyone") then
+		-- Seats: anyone can sit, visitors too.
+		prompt.Enabled = active
 	else
 		prompt.Enabled = active and (isMine(plot) or (coBaking and prompt:GetAttribute("CoBake") == true))
 	end
