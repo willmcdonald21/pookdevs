@@ -1400,7 +1400,8 @@ function stash.take(plot, player, key)
 		end
 	end
 	if taken == 0 then
-		notify(player, ("There are no %ss on this shelf"):format(Config.Recipes[selected].Name:lower()))
+		local where = case.shelf and "on this shelf" or "in this case"
+		notify(player, ("There are no %ss %s"):format(Config.Recipes[selected].Name:lower(), where))
 		return
 	end
 	refreshCase(plot, host, key)
@@ -3178,8 +3179,9 @@ function seats.free(plot, data)
 			local origin = Layout.CFrame(plot.floorTop, Layout.ItemShape(item), entry)
 			for index, seat in item.Seats do
 				local id = key .. ":" .. index
-				if not plot.seated[id] then
-					table.insert(free, { id = id, seat = seat, model = model, origin = origin })
+				local part = model:FindFirstChild("Seat" .. index)
+				if not plot.seated[id] and not (part and part.Occupant) then
+					table.insert(free, { id = id, key = key, index = index, seat = seat, model = model, origin = origin })
 				end
 			end
 		end
@@ -3199,6 +3201,7 @@ function seats.sit(plot, session, person, data)
 	local seat, model = choice.seat, person.model
 	local root = model.PrimaryPart
 	plot.seated[choice.id] = person
+	seats.refresh(plot, choice.key, choice.index)
 	local function moved()
 		return plot.session ~= session or choice.model.Parent ~= plot.placedFolder
 	end
@@ -3227,6 +3230,66 @@ function seats.sit(plot, session, person, data)
 	end
 	if plot.seated[choice.id] == person then
 		plot.seated[choice.id] = nil
+		seats.refresh(plot, choice.key, choice.index)
+	end
+end
+
+-- Players sit in the same seats. Each one is a real Roblox Seat, Seat1, Seat2 and so on in
+-- the piece's model, so they get Roblox's sit pose and jump to get up. Its Sit prompt
+-- shows to everyone, visitors too, while nobody is in it. A seat a player is in is never
+-- given to a customer. The Seats can't be touched, so walking into one doesn't sit you down.
+seats.REACH = 6
+
+-- Shows a seat's Sit prompt only while nobody, player or customer, is in it.
+function seats.refresh(plot, key, index)
+	local model = plot.placedFolder:FindFirstChild("Placed_" .. key)
+	local part = model and model:FindFirstChild("Seat" .. index)
+	if part then
+		setActive(part.Prompt, part.Occupant == nil and plot.seated[key .. ":" .. index] == nil)
+	end
+end
+
+-- Adds the Seats to a piece with Seats in Config when it's built into the bakery, using the
+-- item and spot buildPlaced stored on its model.
+function seats.build(plot, model)
+	local item = Config.GetItem(model:GetAttribute("ItemId") or "")
+	local origin = model:GetAttribute("Origin")
+	if not (item and item.Seats and origin) then
+		return
+	end
+	local key = model.Name:sub(#"Placed_" + 1)
+	for index, seat in item.Seats do
+		local part = Instance.new("Seat")
+		part.Name = "Seat" .. index
+		part.Size = Vector3.new(1.4, 0.2, 1.4)
+		part.Transparency = 1
+		part.Anchored = true
+		part.CanCollide = false
+		part.CanTouch = false
+		part.CastShadow = false
+		local center = origin * (seat.At - Vector3.new(0, part.Size.Y / 2, 0))
+		part.CFrame = CFrame.lookAt(center, center + origin:VectorToWorldSpace(seat.Look))
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.Name = "Prompt"
+		prompt.ActionText = "Sit"
+		prompt.ObjectText = item.Name
+		prompt.HoldDuration = 0
+		prompt.MaxActivationDistance = seats.REACH
+		prompt.RequiresLineOfSight = false
+		prompt:SetAttribute("Everyone", true)
+		prompt.Parent = part
+		prompt.Triggered:Connect(function(player)
+			local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+			local free = part.Occupant == nil and plot.seated[key .. ":" .. index] == nil
+			if humanoid and humanoid.Health > 0 and free and isNear(player, part.Position, seats.REACH + REACH_BUFFER) then
+				part:Sit(humanoid)
+			end
+		end)
+		part:GetPropertyChangedSignal("Occupant"):Connect(function()
+			seats.refresh(plot, key, index)
+		end)
+		part.Parent = model
+		seats.refresh(plot, key, index)
 	end
 end
 
@@ -5601,6 +5664,9 @@ local function setUpPlot(model)
 		plot.paintParts[target.Id] = parts
 	end
 	exterior.setUp(plot)
+	plot.placedFolder.ChildAdded:Connect(function(child)
+		seats.build(plot, child)
+	end)
 	for _, station in Layout.Stations do
 		setUpStation(plot, station)
 	end
