@@ -55,11 +55,21 @@ Layout.Stash = {
 	WhiteboardWidth = 6,
 }
 
--- The floor inside The Sweet Stash at an expansion level.
-function Layout.StashBounds(level)
+-- How much wider than MaxX The Sweet Stash is after size upgrades (Config.Stash.Sizes)
+-- have been bought. The room grows to the right, away from its door.
+function Layout.StashWidth(size)
+	local extra = 0
+	for index = 1, size or 0 do
+		extra += Config.Stash.Sizes[index].Width
+	end
+	return extra
+end
+
+-- The floor inside The Sweet Stash at an expansion level and stash size.
+function Layout.StashBounds(level, size)
 	local stash = Layout.Stash
 	local maxZ = Layout.Bounds(level).MinZ - stash.Wall
-	return { MinX = stash.MinX, MaxX = stash.MaxX, MinZ = maxZ - stash.Depth, MaxZ = maxZ }
+	return { MinX = stash.MinX, MaxX = stash.MaxX + Layout.StashWidth(size), MinZ = maxZ - stash.Depth, MaxZ = maxZ }
 end
 
 -- The garden, the lawn around the outside of the bakery, once it's bought. It reaches Ring
@@ -100,11 +110,11 @@ function Layout.GardenBounds()
 	}
 end
 
--- Where an item can go: The Sweet Stash or the garden for an item with that Room, or
--- else the bakery.
-function Layout.BoundsFor(item, level)
+-- Where an item can go: The Sweet Stash (at stashSize) or the garden for an item with that
+-- Room, or else the bakery.
+function Layout.BoundsFor(item, level, stashSize)
 	if item.Room == "Stash" then
-		return Layout.StashBounds(level)
+		return Layout.StashBounds(level, stashSize)
 	elseif item.Room == "Garden" then
 		return Layout.GardenBounds()
 	end
@@ -112,7 +122,7 @@ function Layout.BoundsFor(item, level)
 end
 
 -- Saved and sent cells must fit in the biggest bakery, its stash or its garden.
-local farthestStash = Layout.StashBounds(#Config.Expansions)
+local farthestStash = Layout.StashBounds(#Config.Expansions, #Config.Stash.Sizes)
 local garden = Layout.GardenBounds()
 Layout.Farthest = {
 	MinX = math.min(Layout.Largest.MinX, farthestStash.MinX, garden.MinX),
@@ -378,9 +388,10 @@ end
 
 -- The parts of The Sweet Stash that nothing can be put on, as things for Check: the
 -- doorway on both sides of the back wall, all the way up so no wall piece hangs over the
--- door, and the whiteboard with room to stand in front of it.
-function Layout.StashThings(level)
-	local stash, bounds, room = Layout.Stash, Layout.Bounds(level), Layout.StashBounds(level)
+-- door, and the whiteboard with room to stand in front of it, on the right wall at its
+-- size now.
+function Layout.StashThings(level, size)
+	local stash, bounds, room = Layout.Stash, Layout.Bounds(level), Layout.StashBounds(level, size)
 	local function fixed(key, name, rect, reason)
 		return { Key = key, Name = name, Rect = rect, Bottom = 0, Height = Layout.WallHeight, Reason = reason }
 	end
@@ -410,12 +421,12 @@ function Layout.StashThings(level)
 end
 
 -- What garden pieces can't go on, as things for Check: the bakery at its size now, walls
--- included, The Sweet Stash's room when stashBought, the path, the crate's and flyer
--- stand's spots, and the town around the bakery (plot is its model). The server works out
--- which cells of the garden the town needs, once, and stores them on the plot as the
--- GardenMask attribute: runs of cells down each column, "x,minZ,maxZ,Kind;" with a Kind
--- from Layout.Garden.Reasons, like W for the townsfolk's way in and out of town.
-function Layout.GardenThings(level, stashBought, plot)
+-- included, The Sweet Stash's room when stashBought (at stashSize), the path, the crate's
+-- and flyer stand's spots, and the town around the bakery (plot is its model). The server
+-- works out which cells of the garden the town needs, once, and stores them on the plot as
+-- the GardenMask attribute: runs of cells down each column, "x,minZ,maxZ,Kind;" with a
+-- Kind from Layout.Garden.Reasons, like W for the townsfolk's way in and out of town.
+function Layout.GardenThings(level, stashBought, plot, stashSize)
 	local bounds, garden, wall = Layout.Bounds(level), Layout.Garden, Layout.Stash.Wall
 	local area = Layout.GardenBounds()
 	local function fixed(key, rect, reason)
@@ -444,7 +455,7 @@ function Layout.GardenThings(level, stashBought, plot)
 		}, spot.Reason))
 	end
 	if stashBought then
-		local room = Layout.StashBounds(level)
+		local room = Layout.StashBounds(level, stashSize)
 		table.insert(things, fixed("Stash", {
 			MinX = room.MinX - wall,
 			MaxX = room.MaxX + wall,
