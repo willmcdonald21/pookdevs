@@ -751,7 +751,7 @@ end
 local function layoutThings(plot, data, item)
 	local things = Layout.AllThings(data.Placed, stationEntries(plot, data), plot.stationShapes)
 	if data.Stash then
-		for _, thing in Layout.StashThings(data.Expansion) do
+		for _, thing in Layout.StashThings(data.Expansion, data.StashSize) do
 			table.insert(things, thing)
 		end
 	end
@@ -898,6 +898,7 @@ local function syncStats(player, skipCoBakers)
 		Stations = plot and stationEntries(plot, data) or {},
 		LuxuryOven = data.LuxuryOven,
 		Stash = data.Stash,
+		StashSize = data.StashSize,
 		Expansion = data.Expansion,
 		Paint = data.Paint,
 		Floor = data.Floor,
@@ -1475,8 +1476,16 @@ function stash.place(plot, data)
 	plot.stashWallTop.Size, plot.stashWallTop.CFrame = cut.Top[1], cut.Top[2]
 	plot.stashWallRight.Parent = walls
 	plot.stashWallTop.Parent = walls
+	-- A room bought bigger, or a bakery grown past the room's front, is built again.
+	local front = Layout.Bounds(data.Expansion).MaxX + Layout.Stash.Wall
+	if plot.stashRoom and plot.stashRoomFit ~= data.StashSize .. ":" .. front then
+		plot.stashRoom:Destroy()
+		plot.stashRoom = nil
+	end
 	if not plot.stashRoom then
 		plot.stashRoom = ServerStorage.StashRoom:Clone()
+		plot.stashRoomFit = data.StashSize .. ":" .. front
+		stash.widen(plot.stashRoom, Layout.StashWidth(data.StashSize), front)
 		local prompt = plot.stashRoom.Whiteboard.Board.Prompt
 		setActive(prompt, true)
 		prompt.Triggered:Connect(function(player)
@@ -1488,6 +1497,46 @@ function stash.place(plot, data)
 		plot.stashRoom.Parent = plot.model
 	end
 	plot.stashRoom:PivotTo(cut.Pivot)
+end
+
+-- Makes a fresh copy of the room template extra studs wider to the right, before it's
+-- moved into place: the right wall, its trim, the right lamp and the whiteboard move out,
+-- and the floor, back wall and back trim stretch. The template is in floor space with its
+-- pivot on the inside face of the bakery's back wall. Where the room reaches past the right
+-- end of the bakery's back wall (front, in floor space), a front wall with its trim closes
+-- the gap.
+function stash.widen(room, extra, front)
+	if extra == 0 then
+		return
+	end
+	local walls = room.Walls
+	local shift = Vector3.new(extra, 0, 0)
+	for _, part in { walls.RightWall, walls.TrimRightWall } do
+		part.CFrame += shift
+	end
+	room.Whiteboard:PivotTo(room.Whiteboard:GetPivot() + shift)
+	local rightLamp
+	for _, lamp in room:GetChildren() do
+		if lamp.Name == "Lamp" and (not rightLamp or lamp.Position.X > rightLamp.Position.X) then
+			rightLamp = lamp
+		end
+	end
+	rightLamp.CFrame += shift
+	for _, part in { room.Floor, walls.BackWall, walls.TrimBackWall } do
+		part.Size += shift
+		part.CFrame += shift / 2
+	end
+	local outside = Layout.Stash.MaxX + extra + Layout.Stash.Wall
+	if outside > front then
+		for _, name in { "RightWall", "TrimRightWall" } do
+			local side = walls[name]
+			local part = side:Clone()
+			part.Name = name == "RightWall" and "FrontWall" or "TrimFrontWall"
+			part.Size = Vector3.new(outside - front, side.Size.Y, side.Size.X)
+			part.CFrame = CFrame.new((front + outside) / 2, side.Position.Y, -Layout.Stash.Wall / 2)
+			part.Parent = walls
+		end
+	end
 end
 
 -- The first free spot for a placed floor piece, searching from the back wall forward, or
@@ -1513,7 +1562,7 @@ end
 -- names of what moved, and where.
 function stash.clearDoorway(plot, data)
 	local moved = {}
-	local doorway = Layout.StashThings(data.Expansion)
+	local doorway = Layout.StashThings(data.Expansion, data.StashSize)
 	local bounds = plotBounds(data)
 	local function blocked(thing)
 		return not Layout.Check(thing, doorway, bounds)
@@ -1664,7 +1713,7 @@ placeEvent.OnServerEvent:Connect(function(player, action, id, x, z, r, y)
 	-- Stash Shelves go in The Sweet Stash, garden plants in the garden, and everything else
 	-- in the bakery.
 	local item = key and Config.GetItem(entry.Id)
-	local bounds = item and Layout.BoundsFor(item, data.Expansion) or plotBounds(data)
+	local bounds = item and Layout.BoundsFor(item, data.Expansion, data.StashSize) or plotBounds(data)
 	local fits, reason = Layout.Check(thing, layoutThings(plot, data, item), bounds)
 	if not fits then
 		notify(player, reason)
@@ -1836,6 +1885,8 @@ exterior.FACES = {
 	RightWall = Vector3.xAxis,
 	FrontLeft = Vector3.zAxis,
 	FrontRight = Vector3.zAxis,
+	-- The front of a stash room wider than the bakery.
+	FrontWall = Vector3.zAxis,
 }
 
 -- Remembers the colours the bakery was built in, and how far below the floor the lawn is.
@@ -1930,7 +1981,7 @@ function exterior.apply(plot, data)
 		return
 	end
 	local color = primary and primary.Color or plot.outsideColor
-	local skip = data.Stash and { Layout.Stash.MinX, Layout.Stash.MaxX } or nil
+	local skip = data.Stash and { Layout.Stash.MinX, Layout.StashBounds(data.Expansion, data.StashSize).MaxX } or nil
 	for _, part in plot.model.Walls:GetChildren() do
 		local face = exterior.FACES[part.Name]
 		if face then
@@ -1943,7 +1994,9 @@ function exterior.apply(plot, data)
 			if face then
 				exterior.skin(plot, part, face, color)
 			else
-				part.Color = secondary and secondary.Color or ServerStorage.StashRoom.Walls[part.Name].Color
+				-- A bigger room's front trim takes the colour of the template's side trims.
+				local template = ServerStorage.StashRoom.Walls
+				part.Color = secondary and secondary.Color or (template:FindFirstChild(part.Name) or template.TrimRightWall).Color
 			end
 		end
 	end
@@ -1980,7 +2033,7 @@ end
 
 -- What garden pieces must keep off, at the bakery's size now.
 function exterior.things(plot, data)
-	return Layout.GardenThings(data.Expansion, data.Stash, plot.model)
+	return Layout.GardenThings(data.Expansion, data.Stash, plot.model, data.StashSize)
 end
 
 -- Lays the invisible GardenGround over the garden once it's bought, or takes it away.
@@ -2067,7 +2120,8 @@ end)
 -- "Paint" takes a paint target's Id and a paint Id, and "PaintCase" a placed paintable
 -- piece's key and a paint Id. "Floor" takes a floor style's Id and a list of tile keys,
 -- and "FloorFill" a floor style's Id. "Exterior" takes a Config.Exterior part's Id and a
--- paint Id, or "Original", and "Garden" buys the garden.
+-- paint Id, or "Original", "Garden" buys the garden, and "StashSize" buys the next size of
+-- The Sweet Stash.
 purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 	local data = PlayerData.Get(player)
 	local plot = playerPlots[player]
@@ -2151,6 +2205,22 @@ purchaseEvent.OnServerEvent:Connect(function(player, kind, id, extra)
 					Config.Stash.Name,
 					table.concat(moved, ", the ")
 				)
+			end
+			notify(player, text, "Coin")
+		end
+	elseif kind == "StashSize" and data.Stash then
+		-- The next of Config.Stash.Sizes, which makes The Sweet Stash wider.
+		local step = Config.Stash.Sizes[data.StashSize + 1]
+		if step and buy(player, data, step.Coins) then
+			data.StashSize += 1
+			stash.place(plot, data)
+			local moved = exterior.clearGarden(plot, data)
+			exterior.apply(plot, data)
+			refreshEmployees(plot, data)
+			syncStats(player)
+			local text = ("%s is bigger! Room for more Stash Shelves"):format(Config.Stash.Name)
+			if #moved > 0 then
+				text = ("%s is bigger! The %s went to your Inventory to make room"):format(Config.Stash.Name, table.concat(moved, ", the "))
 			end
 			notify(player, text, "Coin")
 		end
