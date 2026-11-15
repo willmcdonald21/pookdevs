@@ -1380,6 +1380,40 @@ function panels.Whiteboard()
 		})
 	end
 	addRow(shelf.Name, ("Holds %d extra treats for the Stocker. You have %d to place"):format(#shelf.Slots, stored), actions)
+	-- A bigger stash, one size at a time. The first tap asks, and a second tap within a few
+	-- seconds buys it. stash.sizeAskUntil is when it stops waiting.
+	local step = Config.Stash.Sizes[state.StashSize + 1]
+	local room = Layout.StashBounds(state.Expansion, state.StashSize)
+	local now = ("%d x %d"):format(room.MaxX - room.MinX, room.MaxZ - room.MinZ)
+	if step then
+		local asking = os.clock() < (stash.sizeAskUntil or 0)
+		local canPay = state.Coins >= step.Coins
+		local detail = asking and ("Make it %d studs wider for %s coins? Tap Sure? to buy it"):format(step.Width, withCommas(step.Coins))
+			or ("Now %s. Step %d of %d makes it %d studs wider"):format(now, state.StashSize + 1, #Config.Stash.Sizes, step.Width)
+		addRow("Bigger stash", detail, {
+			{
+				Text = asking and "Sure?" or (withCommas(step.Coins) .. " coins"),
+				Color = canPay and GOLD or GREY,
+				OnClick = function()
+					if not canPay or os.clock() < (stash.sizeAskUntil or 0) then
+						stash.sizeAskUntil = 0
+						purchaseEvent:FireServer("StashSize")
+						return
+					end
+					local waitUntil = os.clock() + Config.SellConfirmSeconds
+					stash.sizeAskUntil = waitUntil
+					refreshPanel()
+					task.delay(Config.SellConfirmSeconds, function()
+						if stash.sizeAskUntil == waitUntil and currentPanel == "Whiteboard" then
+							refreshPanel()
+						end
+					end)
+				end,
+			},
+		})
+	else
+		addRow("Bigger stash", "As big as it gets: " .. now, { { Text = "Biggest!", Color = PINK } })
+	end
 	addRow("Customize store shelves", "Choose which treat the Stocker puts in each display case", {
 		{
 			Text = "Start",
@@ -2473,7 +2507,7 @@ end
 -- Stash's floor while a Stash Shelf is held, or the garden while a garden plant is.
 local function myBounds()
 	local item = held and held.itemId and Config.GetItem(held.itemId)
-	return item and Layout.BoundsFor(item, state.Expansion) or Layout.Bounds(state.Expansion)
+	return item and Layout.BoundsFor(item, state.Expansion, state.StashSize) or Layout.Bounds(state.Expansion)
 end
 
 local function allThings(plot)
@@ -2559,7 +2593,7 @@ local function showGrid(plot)
 	if not tiling.style then
 		local clear = { Layout.Entrance }
 		if state.Stash then
-			for _, fixed in Layout.StashThings(state.Expansion) do
+			for _, fixed in Layout.StashThings(state.Expansion, state.StashSize) do
 				table.insert(clear, fixed.Rect)
 			end
 		end
@@ -2568,7 +2602,7 @@ local function showGrid(plot)
 		-- the plaza (P) are clear to see already.
 		if stash.gridRoom == "Garden" then
 			clear = {}
-			for _, fixed in Layout.GardenThings(state.Expansion, state.Stash, plot) do
+			for _, fixed in Layout.GardenThings(state.Expansion, state.Stash, plot, state.StashSize) do
 				if fixed.Key ~= "Bakery" and fixed.Key ~= "P" and fixed.Key ~= "Stash" then
 					table.insert(clear, fixed.Rect)
 				end
@@ -2743,12 +2777,12 @@ local function refreshHeld()
 	local thing = heldThing()
 	local others = allThings(plot)
 	if state.Stash then
-		for _, fixed in Layout.StashThings(state.Expansion) do
+		for _, fixed in Layout.StashThings(state.Expansion, state.StashSize) do
 			table.insert(others, fixed)
 		end
 	end
 	if garden then
-		for _, fixed in Layout.GardenThings(state.Expansion, state.Stash, plot) do
+		for _, fixed in Layout.GardenThings(state.Expansion, state.Stash, plot, state.StashSize) do
 			table.insert(others, fixed)
 		end
 	end
@@ -2838,11 +2872,11 @@ local function holdItem(itemId, key)
 		-- A Stash Shelf starts in The Sweet Stash, nearest the spot in front of you, and a
 		-- garden plant in the garden. If that spot's taken, the plant starts at the first
 		-- free one in the front yard, from the left.
-		local bounds = Layout.BoundsFor(item, state.Expansion)
+		local bounds = Layout.BoundsFor(item, state.Expansion, state.StashSize)
 		entry = Layout.EntryAt(shape, pointInFront(plot), 0, bounds)
 		if item.Room == "Garden" then
 			local others = allThings(plot)
-			for _, fixed in Layout.GardenThings(state.Expansion, state.Stash, plot) do
+			for _, fixed in Layout.GardenThings(state.Expansion, state.Stash, plot, state.StashSize) do
 				table.insert(others, fixed)
 			end
 			local function fits(spot)
