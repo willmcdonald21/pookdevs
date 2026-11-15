@@ -41,8 +41,10 @@ local UPRIGHT = CFrame.Angles(0, 0, math.rad(90)) -- cylinders run along X, so s
 local largest = Layout.Largest
 local yard = Layout.GardenBounds()
 local BAKERY_BOX = { MinX = yard.MinX - 1, MaxX = yard.MaxX + 1, MinZ = yard.MinZ - 1, MaxZ = yard.MaxZ + 1 }
--- The Sweet Stash behind the back wall of the largest bakery, walls included.
-local stash = Layout.StashBounds(#require(game.ReplicatedStorage.Config).Expansions)
+-- The Sweet Stash at its biggest size, behind the back wall of the largest bakery, walls
+-- included.
+local Config = require(game.ReplicatedStorage.Config)
+local stash = Layout.StashBounds(#Config.Expansions, #Config.Stash.Sizes)
 local STASH_BOX = { MinX = stash.MinX - 5, MaxX = stash.MaxX + 5, MinZ = stash.MinZ - 5, MaxZ = largest.MinZ }
 local BAKERY_FRONT_HALF = 14 -- the path, the crate at x 9 and the flyer stand at x -9
 local GROCERY_BOX = { MinX = -23, MaxX = 23, MinZ = -18, MaxZ = 22 }
