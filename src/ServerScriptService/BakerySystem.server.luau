@@ -1248,17 +1248,16 @@ local function addCase(plot, key, model, origin, slots, promptParent, stand, she
 	local connection = prompt.Triggered:Connect(function(player)
 		stockCase(plot, player, key)
 	end)
-	if shelf then
-		local take = prompt:Clone()
-		take.Name = "TakePrompt"
-		take.ActionText = "Take Treats"
-		take.KeyboardKeyCode = Enum.KeyCode.F
-		take.GamepadKeyCode = Enum.KeyCode.ButtonY
-		take.Parent = promptParent
-		take.Triggered:Connect(function(player)
-			stash.take(plot, player, key)
-		end)
-	end
+	-- Cases and shelves both have Take Treats, which loads their treats back onto the tray.
+	local take = prompt:Clone()
+	take.Name = "TakePrompt"
+	take.ActionText = "Take Treats"
+	take.KeyboardKeyCode = Enum.KeyCode.F
+	take.GamepadKeyCode = Enum.KeyCode.ButtonY
+	take.Parent = promptParent
+	take.Triggered:Connect(function(player)
+		stash.take(plot, player, key)
+	end)
 	plot.cases[key] = {
 		model = model,
 		origin = origin,
@@ -1284,6 +1283,9 @@ local function buildPlaced(plot, data, key)
 	local model = ItemBuilder.Build(item, 1, origin, solid, paint and paint.Color)
 	ItemBuilder.Anchor(model)
 	model.Name = "Placed_" .. key
+	-- What it is and where it stands, for seats.build when it's added.
+	model:SetAttribute("ItemId", item.Id)
+	model:SetAttribute("Origin", origin)
 	if item.Sparkles then
 		local sparkles = Instance.new("Sparkles")
 		sparkles.SparkleColor = Color3.fromRGB(255, 225, 130)
@@ -1362,8 +1364,9 @@ function sparePaint.fit(data, item)
 	end
 end
 
--- Takes treats off a Stash Shelf onto the player's own tray, as many as fit. A selected
--- hotbar box takes only that treat. Otherwise the priciest treats come first.
+-- Takes treats out of a display case or off a Stash Shelf onto the player's own tray, as
+-- many as fit. A selected hotbar box takes only that treat. Otherwise the priciest treats
+-- come first.
 function stash.take(plot, player, key)
 	local data = PlayerData.Get(player)
 	local host = plot.owner and PlayerData.Get(plot.owner)
@@ -1375,7 +1378,7 @@ function stash.take(plot, player, key)
 	local stock = host.Stock[key]
 	local space = trayCapacity(data) - trayTotal(data)
 	if #stock == 0 then
-		notify(player, "This shelf is empty")
+		notify(player, case.shelf and "This shelf is empty" or "This case is empty")
 		return
 	elseif space <= 0 then
 		notify(player, "Your tray is full! Stock a case first")
