@@ -1400,11 +1400,16 @@ Config.LuxuryOven = {
 -- A storage room through a door in the back wall, bought once in the Shop. Its whiteboard
 -- sells Stash Shelves and lets the owner choose which treat the Stocker puts in each
 -- display case. The Stocker puts treats that don't fit in a case on the shelves, and
--- brings them out when a case has room.
+-- brings them out when a case has room. Once it's bought, the whiteboard also sells Sizes
+-- in order, each making the room Width studs wider to the right, away from its door.
 Config.Stash = {
 	Name = "The Sweet Stash",
 	Coins = 1000,
 	Detail = "A storage room through a back door. The Stocker keeps extra treats on its shelves until your cases have room",
+	Sizes = {
+		{ Coins = 400, Width = 10 },
+		{ Coins = 1000, Width = 10 },
+	},
 }
 
 -- The outside of a bakery, changed in the popup that opens when its owner taps its sign.
