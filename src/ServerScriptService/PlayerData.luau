@@ -52,9 +52,9 @@ local SHOES_REFUNDS = { 0, 40, 340, 1840 }
 -- of a save (Stars, receipts, boosts, the daily streak, invites) stays with the player.
 local RESTAURANT_FIELDS = {
 	"Coins", "RecipesUnlocked", "BakeryLevel", "BakeryXp", "Tray", "Owned", "Placed", "Stock",
-	"Stations", "LayoutVersion", "LuxuryOven", "Stash", "Expansion", "Paint", "Exterior",
-	"BakeryName", "Garden", "Floor", "Goals", "Employees", "LastRecipe", "SparePaint", "Pantry",
-	"TreatDesigns",
+	"Stations", "LayoutVersion", "LuxuryOven", "Stash", "StashSize", "Expansion", "Paint",
+	"Exterior", "BakeryName", "Garden", "Floor", "Goals", "Employees", "LastRecipe", "SparePaint",
+	"Pantry", "TreatDesigns",
 }
 for _, upgrade in Config.Upgrades do
 	table.insert(RESTAURANT_FIELDS, upgrade.Id .. "Level")
@@ -168,7 +168,7 @@ local function cleanLayout(data, savedPlaced, savedStock, savedStations)
 			if item.Slots and not item.Room and type(treat) == "number" and Config.Recipes[treat] and treat % 1 == 0 then
 				entry.Treat = treat
 			end
-			local fits = Layout.Inside(Layout.Rect(Layout.ItemShape(item), entry), Layout.BoundsFor(item, data.Expansion))
+			local fits = Layout.Inside(Layout.Rect(Layout.ItemShape(item), entry), Layout.BoundsFor(item, data.Expansion, data.StashSize))
 			-- A Room is The Sweet Stash or the garden, and data.Stash or data.Garden is true
 			-- once it's bought.
 			if item.Room and not data[item.Room] then
@@ -369,6 +369,9 @@ local function clean(saved)
 		LuxuryOven = saved.LuxuryOven == true,
 		-- True once The Sweet Stash, the storage room behind the back wall, has been bought.
 		Stash = saved.Stash == true,
+		-- How many of Config.Stash.Sizes have been bought, each making the stash wider. 0
+		-- without the stash.
+		StashSize = saved.Stash == true and math.clamp(math.floor(tonumber(saved.StashSize) or 0), 0, #Config.Stash.Sizes) or 0,
 		-- How many times the bakery has been made bigger. 0 is the starting size.
 		Expansion = math.clamp(math.floor(tonumber(saved.Expansion) or 0), 0, #Config.Expansions),
 		Paint = cleanPaint(saved.Paint),
