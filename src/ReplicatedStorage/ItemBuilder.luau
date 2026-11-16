@@ -28,9 +28,17 @@ function ItemBuilder.Build(definition, scale, cframe, solid, paint)
 			part.Shape = Enum.PartType.Cylinder
 			part.Size = Vector3.new(spec.Height, spec.Diameter, spec.Diameter) * scale
 			part.CFrame = cframe * offset * CFrame.Angles(0, math.rad(90), 0)
+		elseif spec.Kind == "Ball" and spec.Size then
+			-- Roblox draws a Ball part as a round ball the size of its smallest side, so a
+			-- squashed one is a block drawn with a sphere mesh, which fills the whole Size.
+			part.Size = spec.Size * scale
+			part.CFrame = cframe * offset
+			local mesh = Instance.new("SpecialMesh")
+			mesh.MeshType = Enum.MeshType.Sphere
+			mesh.Parent = part
 		elseif spec.Kind == "Ball" then
 			part.Shape = Enum.PartType.Ball
-			part.Size = (spec.Size or Vector3.one * spec.Diameter) * scale
+			part.Size = Vector3.one * spec.Diameter * scale
 			part.CFrame = cframe * offset
 		else
 			part.Size = spec.Size * scale
