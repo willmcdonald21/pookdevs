@@ -679,6 +679,64 @@ local function stashShelf(item)
 	return item
 end
 
+-- Chairs for the table sets. Each stands at x, z with its sitter facing fx, fz (one step
+-- along X or Z, toward the table) and its back on the far side. It adds its parts to parts
+-- and returns its seat for Seats: At is the top of the seat, and customers step in from a
+-- stride behind it.
+local OAK = rgb(205, 155, 105)
+local OAK_DARK = rgb(150, 100, 70)
+local IRON = rgb(45, 42, 48)
+local VELVET = rgb(235, 120, 150)
+
+-- A box that runs across a chair's back, along the side the sitter's shoulders face.
+local function acrossBack(fx, fz, length, height, thickness)
+	return fx ~= 0 and Vector3.new(thickness, height, length) or Vector3.new(length, height, thickness)
+end
+
+local function ladderChair(parts, x, z, fx, fz)
+	local sideX, sideZ = -fz, fx
+	local backX, backZ = x - fx * 0.6, z - fz * 0.6
+	table.insert(parts, { Kind = "Box", Size = Vector3.new(1.3, 0.2, 1.3), X = x, Y = 1.7, Z = z, Color = OAK, Material = Enum.Material.Wood })
+	for _, corner in { { -1, -1 }, { -1, 1 }, { 1, -1 }, { 1, 1 } } do
+		table.insert(parts, { Kind = "Box", Size = Vector3.new(0.15, 1.6, 0.15), X = x + corner[1] * 0.55, Y = 0.8, Z = z + corner[2] * 0.55, Color = OAK_DARK })
+	end
+	for _, side in { -1, 1 } do
+		table.insert(parts, { Kind = "Box", Size = Vector3.new(0.15, 1.8, 0.15), X = backX + sideX * side * 0.55, Y = 2.7, Z = backZ + sideZ * side * 0.55, Color = OAK_DARK })
+	end
+	for _, y in { 2.6, 3.4 } do
+		table.insert(parts, { Kind = "Box", Size = acrossBack(fx, fz, 1.2, 0.15, 0.12), X = backX, Y = y, Z = backZ, Color = OAK, Material = Enum.Material.Wood })
+	end
+	return { At = Vector3.new(x, 1.8, z), Look = Vector3.new(fx, 0, fz), From = Vector3.new(x - fx * 1.6, 0, z - fz * 1.6) }
+end
+
+-- A curly black iron cafe chair with a pink cushion.
+local function bistroChair(parts, x, z, fx, fz)
+	local sideX, sideZ = -fz, fx
+	local backX, backZ = x - fx * 0.6, z - fz * 0.6
+	table.insert(parts, { Kind = "Disc", Height = 0.15, Diameter = 1.3, X = x, Y = 1.7, Z = z, Color = IRON, Material = Enum.Material.Metal })
+	table.insert(parts, { Kind = "Disc", Height = 0.15, Diameter = 1.15, X = x, Y = 1.82, Z = z, Color = rgb(255, 190, 205), Material = Enum.Material.Fabric })
+	for _, corner in { { -1, -1 }, { -1, 1 }, { 1, -1 }, { 1, 1 } } do
+		table.insert(parts, { Kind = "Disc", Height = 1.6, Diameter = 0.12, X = x + corner[1] * 0.42, Y = 0.8, Z = z + corner[2] * 0.42, Color = IRON, Material = Enum.Material.Metal })
+	end
+	for _, side in { -1, 1 } do
+		table.insert(parts, { Kind = "Disc", Height = 1.6, Diameter = 0.12, X = backX + sideX * side * 0.5, Y = 2.6, Z = backZ + sideZ * side * 0.5, Color = IRON, Material = Enum.Material.Metal })
+		table.insert(parts, { Kind = "Ball", Diameter = 0.25, X = backX + sideX * side * 0.5, Y = 3.45, Z = backZ + sideZ * side * 0.5, Color = IRON, Material = Enum.Material.Metal })
+	end
+	table.insert(parts, { Kind = "Box", Size = acrossBack(fx, fz, 1.1, 0.12, 0.12), X = backX, Y = 3.3, Z = backZ, Color = IRON, Material = Enum.Material.Metal })
+	table.insert(parts, { Kind = "Ball", Diameter = 0.4, X = backX, Y = 2.75, Z = backZ, Color = IRON, Material = Enum.Material.Metal })
+	return { At = Vector3.new(x, 1.9, z), Look = Vector3.new(fx, 0, fz), From = Vector3.new(x - fx * 1.6, 0, z - fz * 1.6) }
+end
+
+-- Builds a table set: tableParts, then a chair from makeChair at each { x, z, fx, fz }.
+local function tableSet(item, tableParts, makeChair, chairs)
+	item.Parts = tableParts
+	item.Seats = {}
+	for _, chair in chairs do
+		table.insert(item.Seats, makeChair(item.Parts, chair[1], chair[2], chair[3], chair[4]))
+	end
+	return item
+end
+
 Config.Items = {
 	-- Two shelves of three, the same height as before.
 	displayCase({ Id = "SmallCase", Name = "Display Case", Coins = 20, Charm = 0 }, 2, 2.2),
@@ -750,6 +808,109 @@ Config.Items = {
 			{ Kind = "Disc", Height = 1.6, Diameter = 0.3, X = -1.9, Y = 0.8, Color = rgb(190, 130, 95) },
 			{ Kind = "Disc", Height = 0.3, Diameter = 1.4, X = 1.9, Y = 1.6, Color = rgb(240, 150, 175) },
 			{ Kind = "Disc", Height = 1.6, Diameter = 0.3, X = 1.9, Y = 0.8, Color = rgb(190, 130, 95) },
+		},
+	},
+	-- Table sets and chairs. Customers sit in any free seat after paying, and so can anyone
+	-- in the bakery.
+	tableSet({ Id = "BistroSet", Name = "Bistro Set", Coins = 40, Charm = 2 }, {
+		{ Kind = "Disc", Height = 0.2, Diameter = 2.4, Y = 2.9, Color = rgb(245, 245, 248), Material = Enum.Material.Marble },
+		{ Kind = "Disc", Height = 2.7, Diameter = 0.25, Y = 1.45, Color = IRON, Material = Enum.Material.Metal },
+		{ Kind = "Disc", Height = 0.15, Diameter = 1.2, Y = 0.075, Color = IRON, Material = Enum.Material.Metal },
+	}, bistroChair, { { -2, 0, 1, 0 }, { 2, 0, -1, 0 } }),
+	tableSet({ Id = "TableForFour", Name = "Table for Four", Coins = 60, Charm = 3 }, {
+		{ Kind = "Box", Size = Vector3.new(3.2, 0.25, 3.2), Y = 2.9, Color = OAK, Material = Enum.Material.Wood },
+		{ Kind = "Box", Size = Vector3.new(0.25, 2.8, 0.25), X = -1.35, Y = 1.4, Z = -1.35, Color = OAK_DARK },
+		{ Kind = "Box", Size = Vector3.new(0.25, 2.8, 0.25), X = 1.35, Y = 1.4, Z = -1.35, Color = OAK_DARK },
+		{ Kind = "Box", Size = Vector3.new(0.25, 2.8, 0.25), X = -1.35, Y = 1.4, Z = 1.35, Color = OAK_DARK },
+		{ Kind = "Box", Size = Vector3.new(0.25, 2.8, 0.25), X = 1.35, Y = 1.4, Z = 1.35, Color = OAK_DARK },
+	}, ladderChair, { { -2.4, 0, 1, 0 }, { 2.4, 0, -1, 0 }, { 0, -2.4, 0, 1 }, { 0, 2.4, 0, -1 } }),
+	{
+		Id = "DinerBooth",
+		Name = "Diner Booth",
+		Coins = 80,
+		Charm = 3,
+		-- Two people on each bench, stepping in from the open ends.
+		Seats = {
+			{ At = Vector3.new(-2.3, 1.8, -0.7), Look = Vector3.new(1, 0, 0), From = Vector3.new(-2.3, 0, -2.6) },
+			{ At = Vector3.new(-2.3, 1.8, 0.7), Look = Vector3.new(1, 0, 0), From = Vector3.new(-2.3, 0, 2.6) },
+			{ At = Vector3.new(2.3, 1.8, -0.7), Look = Vector3.new(-1, 0, 0), From = Vector3.new(2.3, 0, -2.6) },
+			{ At = Vector3.new(2.3, 1.8, 0.7), Look = Vector3.new(-1, 0, 0), From = Vector3.new(2.3, 0, 2.6) },
+		},
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(2.6, 0.25, 2.4), Y = 2.9, Color = rgb(250, 248, 242) },
+			{ Kind = "Box", Size = Vector3.new(2.7, 0.12, 2.5), Y = 2.75, Color = rgb(200, 200, 210), Material = Enum.Material.Metal },
+			{ Kind = "Disc", Height = 2.7, Diameter = 0.3, Y = 1.35, Color = rgb(200, 200, 210), Material = Enum.Material.Metal },
+			{ Kind = "Box", Size = Vector3.new(1.5, 1.5, 3.1), X = -2.4, Y = 0.75, Color = rgb(255, 240, 225) },
+			{ Kind = "Box", Size = Vector3.new(1.5, 1.5, 3.1), X = 2.4, Y = 0.75, Color = rgb(255, 240, 225) },
+			{ Kind = "Box", Size = Vector3.new(1.4, 0.3, 3), X = -2.35, Y = 1.65, Color = VELVET, Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(1.4, 0.3, 3), X = 2.35, Y = 1.65, Color = VELVET, Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(0.45, 2.5, 3), X = -3.05, Y = 3.05, Color = VELVET, Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(0.45, 2.5, 3), X = 3.05, Y = 3.05, Color = VELVET, Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(0.6, 0.3, 3.1), X = -3.05, Y = 4.4, Color = rgb(215, 100, 130), Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(0.6, 0.3, 3.1), X = 3.05, Y = 4.4, Color = rgb(215, 100, 130), Material = Enum.Material.Fabric },
+		},
+	},
+	{
+		Id = "WindowBar",
+		Name = "Window Bar",
+		Coins = 50,
+		Charm = 2,
+		Seats = {
+			{ At = Vector3.new(-2, 3.1, -1.5), Look = Vector3.new(0, 0, 1), From = Vector3.new(-2, 0, -3.2) },
+			{ At = Vector3.new(0, 3.1, -1.5), Look = Vector3.new(0, 0, 1), From = Vector3.new(0, 0, -3.2) },
+			{ At = Vector3.new(2, 3.1, -1.5), Look = Vector3.new(0, 0, 1), From = Vector3.new(2, 0, -3.2) },
+		},
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(6, 0.25, 1.4), Y = 3.9, Color = OAK_DARK, Material = Enum.Material.Wood },
+			{ Kind = "Box", Size = Vector3.new(0.3, 3.8, 1.2), X = -2.8, Y = 1.9, Color = OAK, Material = Enum.Material.Wood },
+			{ Kind = "Box", Size = Vector3.new(0.3, 3.8, 1.2), X = 2.8, Y = 1.9, Color = OAK, Material = Enum.Material.Wood },
+			{ Kind = "Box", Size = Vector3.new(5.3, 0.15, 0.15), Y = 0.9, Z = -0.5, Color = rgb(200, 200, 210), Material = Enum.Material.Metal },
+			{ Kind = "Disc", Height = 0.3, Diameter = 1.2, X = -2, Y = 2.95, Z = -1.5, Color = rgb(240, 150, 175), Material = Enum.Material.Fabric },
+			{ Kind = "Disc", Height = 2.8, Diameter = 0.2, X = -2, Y = 1.4, Z = -1.5, Color = rgb(200, 200, 210), Material = Enum.Material.Metal },
+			{ Kind = "Disc", Height = 0.15, Diameter = 1, X = -2, Y = 0.075, Z = -1.5, Color = rgb(200, 200, 210), Material = Enum.Material.Metal },
+			{ Kind = "Disc", Height = 0.3, Diameter = 1.2, Y = 2.95, Z = -1.5, Color = rgb(175, 225, 205), Material = Enum.Material.Fabric },
+			{ Kind = "Disc", Height = 2.8, Diameter = 0.2, Y = 1.4, Z = -1.5, Color = rgb(200, 200, 210), Material = Enum.Material.Metal },
+			{ Kind = "Disc", Height = 0.15, Diameter = 1, Y = 0.075, Z = -1.5, Color = rgb(200, 200, 210), Material = Enum.Material.Metal },
+			{ Kind = "Disc", Height = 0.3, Diameter = 1.2, X = 2, Y = 2.95, Z = -1.5, Color = rgb(255, 225, 140), Material = Enum.Material.Fabric },
+			{ Kind = "Disc", Height = 2.8, Diameter = 0.2, X = 2, Y = 1.4, Z = -1.5, Color = rgb(200, 200, 210), Material = Enum.Material.Metal },
+			{ Kind = "Disc", Height = 0.15, Diameter = 1, X = 2, Y = 0.075, Z = -1.5, Color = rgb(200, 200, 210), Material = Enum.Material.Metal },
+		},
+	},
+	{
+		Id = "PastelChair",
+		Name = "Pastel Chair",
+		Coins = 10,
+		Charm = 1,
+		OriginalPaint = "Mint",
+		Seats = { { At = Vector3.new(0, 1.92, 0), Look = Vector3.new(0, 0, -1), From = Vector3.new(0, 0, -1.8) } },
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(1.4, 0.2, 1.4), Y = 1.7, Color = rgb(175, 225, 205), Paint = true },
+			{ Kind = "Box", Size = Vector3.new(1.2, 0.12, 1.2), Y = 1.86, Color = rgb(255, 250, 240), Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(0.15, 1.6, 0.15), X = -0.6, Y = 0.8, Z = -0.6, Color = rgb(175, 225, 205), Paint = true },
+			{ Kind = "Box", Size = Vector3.new(0.15, 1.6, 0.15), X = 0.6, Y = 0.8, Z = -0.6, Color = rgb(175, 225, 205), Paint = true },
+			{ Kind = "Box", Size = Vector3.new(0.15, 3.4, 0.15), X = -0.6, Y = 1.7, Z = 0.6, Color = rgb(175, 225, 205), Paint = true },
+			{ Kind = "Box", Size = Vector3.new(0.15, 3.4, 0.15), X = 0.6, Y = 1.7, Z = 0.6, Color = rgb(175, 225, 205), Paint = true },
+			{ Kind = "Box", Size = Vector3.new(1.35, 0.8, 0.12), Y = 3, Z = 0.6, Color = rgb(175, 225, 205), Paint = true },
+		},
+	},
+	{
+		Id = "HeartLoveseat",
+		Name = "Heart Loveseat",
+		Stars = 10,
+		Charm = 6,
+		Seats = {
+			{ At = Vector3.new(-0.85, 1.8, -0.15), Look = Vector3.new(0, 0, -1), From = Vector3.new(-0.85, 0, -2) },
+			{ At = Vector3.new(0.85, 1.8, -0.15), Look = Vector3.new(0, 0, -1), From = Vector3.new(0.85, 0, -2) },
+		},
+		Parts = {
+			{ Kind = "Box", Size = Vector3.new(3.6, 1.2, 1.9), Y = 0.9, Color = VELVET, Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(1.65, 0.3, 1.5), X = -0.85, Y = 1.65, Z = -0.15, Color = rgb(255, 190, 205), Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(1.65, 0.3, 1.5), X = 0.85, Y = 1.65, Z = -0.15, Color = rgb(255, 190, 205), Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(0.45, 1, 1.9), X = -1.95, Y = 1.9, Color = rgb(215, 100, 130), Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(0.45, 1, 1.9), X = 1.95, Y = 1.9, Color = rgb(215, 100, 130), Material = Enum.Material.Fabric },
+			{ Kind = "Ball", Size = Vector3.new(2.2, 2.2, 0.6), X = -0.8, Y = 3.3, Z = 0.75, Color = VELVET, Material = Enum.Material.Fabric },
+			{ Kind = "Ball", Size = Vector3.new(2.2, 2.2, 0.6), X = 0.8, Y = 3.3, Z = 0.75, Color = VELVET, Material = Enum.Material.Fabric },
+			{ Kind = "Box", Size = Vector3.new(2.3, 2.3, 0.55), Y = 2.5, Z = 0.75, Turn = Vector3.new(0, 0, 45), Color = VELVET, Material = Enum.Material.Fabric },
 		},
 	},
 	{
